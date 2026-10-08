@@ -352,9 +352,11 @@ describe('query', () => {
 
             await expect(performQuery(query, undefined, 'async')).resolves.toEqual(results)
 
-            expect(capture.mock.calls.filter(([event]) => event === 'query rerun after status expired')).toEqual([
-                ['query rerun after status expired', { source: 'query', recovered }, undefined],
-            ])
+            expect(capture.mock.calls.find(([event]) => event === 'query completed')?.[1]).toMatchObject({
+                submit_attempts: 2,
+                retry_status: 404,
+                retry_recovered: recovered,
+            })
         })
 
         it.each([

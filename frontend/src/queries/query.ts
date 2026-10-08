@@ -335,47 +335,24 @@ async function executeQuery<N extends DataNode>(
         if (retriedAfterExpiry || !isExpiredQueryStatusError(e) || isSharedView()) {
             throw e
         }
-        return await captureRerunAfterStatusExpired(
-            'query',
-            () =>
-                executeQuery(
-                    queryNode,
-                    submitTelemetry,
-                    methodOptions,
-                    refresh === 'force_async' ? 'async' : refresh,
-                    queryId,
-                    setPollResponse,
-                    filtersOverride,
-                    variablesOverride,
-                    false,
-                    limitContext,
-                    acceptStaleCache,
-                    true
-                ),
-            (result) => result != null
+        return await executeQuery(
+            queryNode,
+            submitTelemetry,
+            methodOptions,
+            refresh === 'force_async' ? 'async' : refresh,
+            queryId,
+            setPollResponse,
+            filtersOverride,
+            variablesOverride,
+            false,
+            limitContext,
+            acceptStaleCache,
+            true
         )
     }
     submitTelemetry.retry_recovered =
         submitTelemetry.submit_attempts > 1 && statusResponse.results != null && !statusResponse.error
     return statusResponse.results
-}
-
-/** Records whether a rerun after an expired status poll recovers, because the 404 alone does not show it. */
-export async function captureRerunAfterStatusExpired<T>(
-    source: 'query' | 'dashboard_tile',
-    rerun: () => Promise<T>,
-    didRecover: (result: T) => boolean
-): Promise<T> {
-    try {
-        const result = await rerun()
-        posthog.capture('query rerun after status expired', { source, recovered: didRecover(result) })
-        return result
-    } catch (e) {
-        if (!isAbortError(e)) {
-            posthog.capture('query rerun after status expired', { source, recovered: false })
-        }
-        throw e
-    }
 }
 
 // Return data for a given query
