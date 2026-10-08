@@ -5,9 +5,19 @@ import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
 import { urls } from 'scenes/urls'
 
 import type { CloudAgentRunApi } from '../generated/api.schemas'
-import { CloudAgentRunStatusEnumApi } from '../generated/api.schemas'
-import { INFERENCE_MODE_DISPLAY, STOP_REASON_MESSAGES } from '../utils/runStatus'
+import { CloudAgentRunStatusReasonEnumApi } from '../generated/api.schemas'
+import { INFERENCE_MODE_DISPLAY, REASONING_EFFORT_LABELS } from '../utils/runStatus'
+import { RunOutput } from './RunOutput'
 import { RunStatusTag } from './RunStatusTag'
+
+const FAILURE_REASONS: CloudAgentRunStatusReasonEnumApi[] = [
+    CloudAgentRunStatusReasonEnumApi.ProvisionFailed,
+    CloudAgentRunStatusReasonEnumApi.UnexpectedFailure,
+]
+const LIMIT_REASONS: CloudAgentRunStatusReasonEnumApi[] = [
+    CloudAgentRunStatusReasonEnumApi.TimedOut,
+    CloudAgentRunStatusReasonEnumApi.CreditSpent,
+]
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
     return (
@@ -18,23 +28,21 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
     )
 }
 
-/** The status of a run, why it stopped, the prompt, and the facts about how it ran. */
+/** The status of a run, why it stopped, the prompt, the result, and the facts about how it ran. */
 export function RunSummaryCard({ run }: { run: CloudAgentRunApi }): JSX.Element {
-    const failed = run.status === CloudAgentRunStatusEnumApi.Failed
-    const stopMessage = run.stop_reason ? STOP_REASON_MESSAGES[run.stop_reason] : null
+    const repository = run.repositories[0]
+    const reason = run.status_reason
+    const isFailure = !!reason && FAILURE_REASONS.includes(reason)
+    const isLimit = !!reason && LIMIT_REASONS.includes(reason)
+    const showBanner = (isFailure || isLimit) && !!run.status_detail
 
     return (
         <LemonCard hoverEffect={false} className="flex flex-col gap-3 p-4" data-attr="cloud-agents-run-summary">
             <div className="flex flex-wrap items-center gap-2">
-                <RunStatusTag status={run.status} />
-                {stopMessage && !failed && <span className="text-secondary">{stopMessage}</span>}
+                <RunStatusTag status={run.status} reason={reason} />
+                {!showBanner && run.status_detail && <span className="text-secondary">{run.status_detail}</span>}
             </div>
-            {failed && (
-                <LemonBanner type="error">
-                    {run.error || stopMessage || 'The run failed.'} Send a message below to try again on the same
-                    branch.
-                </LemonBanner>
-            )}
+            {showBanner && <LemonBanner type={isFailure ? 'error' : 'warning'}>{run.status_detail}</LemonBanner>}
             <div>
                 <div className="text-secondary text-xs">Prompt</div>
                 <p className="m-0 whitespace-pre-wrap break-words" translate="no">
@@ -51,27 +59,32 @@ export function RunSummaryCard({ run }: { run: CloudAgentRunApi }): JSX.Element 
                     </div>
                 </div>
             )}
+            {run.result.output !== null && <RunOutput output={run.result.output} />}
             <dl className="m-0 grid grid-cols-2 gap-3 border-t pt-3 @min-[40rem]/main-content:grid-cols-4">
                 <Fact label="Repository">
-                    <span translate="no">{run.repository}</span>
+                    <span translate="no">{repository?.name ?? 'None'}</span>
                 </Fact>
                 <Fact label="Branch">
-                    <span translate="no">{run.branch ?? 'Default branch'}</span>
+                    <span translate="no">{repository?.initial_branch ?? 'Default branch'}</span>
                 </Fact>
-                <Fact label="Profile">
-                    {run.profile ? <Link to={urls.cloudAgentProfile(run.profile.id)}>{run.profile.name}</Link> : 'None'}
+                <Fact label="Preset">
+                    {run.preset ? <Link to={urls.cloudAgentPreset(run.preset.id)}>{run.preset.name}</Link> : 'None'}
                 </Fact>
                 <Fact label="Model">
                     <span translate="no">{run.config.model ?? 'Default'}</span>
                 </Fact>
+                <Fact label="Reasoning effort">
+                    {run.config.reasoning_effort ? REASONING_EFFORT_LABELS[run.config.reasoning_effort] : 'Default'}
+                </Fact>
                 <Fact label="Model provider">{INFERENCE_MODE_DISPLAY[run.config.inference]?.label}</Fact>
+                <Fact label="Idle time">{run.config.idle_minutes} minutes</Fact>
                 <Fact label="Started by">
                     <span translate="no">{run.created_by?.email ?? (run.caller === 'api' ? 'API' : 'Unknown')}</span>
                 </Fact>
                 <Fact label="Created">
                     <TZLabel time={run.created_at} />
                 </Fact>
-                <Fact label="Finished">{run.completed_at ? <TZLabel time={run.completed_at} /> : 'Not finished'}</Fact>
+                <Fact label="Last stopped">{run.ended_at ? <TZLabel time={run.ended_at} /> : 'Not stopped yet'}</Fact>
             </dl>
         </LemonCard>
     )

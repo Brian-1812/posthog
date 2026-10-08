@@ -1,7 +1,7 @@
 import { MakeLogicType, afterMount, kea, key, path, props } from 'kea'
 import posthog from 'posthog-js'
 
-export type CloudAgentsSceneName = 'runs' | 'run' | 'profiles' | 'profile' | 'usage' | 'settings'
+export type CloudAgentsSceneName = 'runs' | 'run' | 'presets' | 'preset' | 'usage' | 'settings'
 
 export interface CloudAgentsSceneLogicProps {
     scene: CloudAgentsSceneName

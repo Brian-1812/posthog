@@ -21,7 +21,9 @@ export function RunsTable(): JSX.Element {
             title: 'Status',
             key: 'status',
             width: 0,
-            render: (_, run) => <RunStatusTag status={run.status} />,
+            render: (_, run) => (
+                <RunStatusTag status={run.status} reason={run.status_reason} detail={run.status_detail} />
+            ),
         },
         {
             title: 'Prompt',
@@ -42,18 +44,20 @@ export function RunsTable(): JSX.Element {
             key: 'repository',
             render: (_, run) => (
                 <div className="flex flex-col whitespace-nowrap" translate="no">
-                    <span>{run.repository}</span>
-                    {run.branch && <span className="text-secondary text-xs">{run.branch}</span>}
+                    <span>{run.repositories[0]?.name ?? 'None'}</span>
+                    {run.repositories[0]?.initial_branch && (
+                        <span className="text-secondary text-xs">{run.repositories[0].initial_branch}</span>
+                    )}
                 </div>
             ),
         },
         {
-            title: 'Profile',
-            key: 'profile',
+            title: 'Preset',
+            key: 'preset',
             render: (_, run) =>
-                run.profile ? (
-                    <Link to={urls.cloudAgentProfile(run.profile.id)} className="whitespace-nowrap">
-                        {run.profile.name}
+                run.preset ? (
+                    <Link to={urls.cloudAgentPreset(run.preset.id)} className="whitespace-nowrap">
+                        {run.preset.name}
                     </Link>
                 ) : (
                     <span className="text-secondary">None</span>

@@ -16,10 +16,12 @@ const RUN_ERROR_MESSAGES: Record<string, string> = {
     concurrency_limited:
         'This project already has the maximum number of runs in progress. Wait for one to finish or cancel one, then try again.',
     repository_required: 'Choose a repository for the run, or set a default repository in settings.',
+    run_done: 'This run is done and cannot continue. Start a new run to continue the work.',
     credential_owner_required:
         'This run uses the subscription of the person who started it, so only that person can continue it. Start a new run to use your own.',
-    run_stopping: 'This run is stopping. Wait until it stops, then send your message to resume it.',
-    run_not_resumable: 'This run cannot be resumed. Start a new run from the same prompt.',
+    run_stopping: 'This run is stopping. Wait until it stops, then send your message to continue it.',
+    run_not_ready: 'This run is still starting. Try again in a few seconds.',
+    run_not_resumable: 'This run cannot be continued. Start a new run from the same prompt.',
     cancel_unavailable: 'This run cannot be canceled right now. Refresh the page and try again.',
 }
 

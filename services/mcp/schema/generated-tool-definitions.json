@@ -2638,11 +2638,11 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-preset-create": {
-        "description": "Create a profile: a named set of run defaults such as repository, branch, model, size, inference mode, instructions and tags. A run that names the profile uses these defaults, so later runs need only a prompt. Only `name` is required, and the name must be unique in the project. Creating a profile starts no run and costs nothing. A value sent on a run overrides the profile value for that run.",
+        "description": "Create a preset: a named set of run defaults such as `repositories` (one repository for now), model, `reasoning_effort`, size, inference mode, instructions, `create_pr`, `idle_minutes`, `output_schema` and tags. A run that names the preset uses these defaults, so later runs need only a prompt. Only `name` is required, and the name must be unique in the project. Creating a preset starts no run and costs nothing. A value sent on a run overrides the preset value for that run.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
-        "summary": "Create cloud agent profile",
-        "title": "Create cloud agent profile",
+        "summary": "Create cloud agent preset",
+        "title": "Create cloud agent preset",
         "required_scopes": ["cloud_agent:write"],
         "annotations": {
             "destructiveHint": false,
@@ -2654,11 +2654,11 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-preset-get": {
-        "description": "Get one profile by ID, with all the run defaults it sets. A null field sets no default. Use cloud-agents-preset-list to find the ID.",
+        "description": "Get one preset by ID, with all the run defaults it sets. A null field sets no default. Use cloud-agents-preset-list to find the ID.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
-        "summary": "Get cloud agent profile",
-        "title": "Get cloud agent profile",
+        "summary": "Get cloud agent preset",
+        "title": "Get cloud agent preset",
         "required_scopes": ["cloud_agent:read"],
         "annotations": {
             "destructiveHint": false,
@@ -2670,11 +2670,11 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-preset-list": {
-        "description": "List the profiles of the project. A profile is a named set of run defaults. Use it to find a profile to pass as `profile` to cloud-agents-run-create, by ID or by name.",
+        "description": "List the presets of the project. A preset is a named set of run defaults. Use it to find a preset to pass as `preset` to cloud-agents-run-create, by ID or by name.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
-        "summary": "List cloud agent profiles",
-        "title": "List cloud agent profiles",
+        "summary": "List cloud agent presets",
+        "title": "List cloud agent presets",
         "required_scopes": ["cloud_agent:read"],
         "annotations": {
             "destructiveHint": false,
@@ -2686,7 +2686,7 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-run-cancel": {
-        "description": "Ask a run to stop. The agent stops in the middle of its work, and compute billing ends when the sandbox stops. The run can stay `running` for a short time, so read it again with cloud-agents-run-get until the status is `cancelled`. A run that already stopped is returned unchanged. A cancelled run can continue later with cloud-agents-run-message.",
+        "description": "Ask a `queued` or `running` run to stop. The agent stops in the middle of its work, and compute billing ends when the sandbox stops. The run can stay `running` for a short time, so read it again with cloud-agents-run-get until the status is `done` with the status reason `cancelled`. A canceled run is final: a message to it is refused. An `idle` or `done` run has no agent to stop and is returned unchanged.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "Cancel cloud agent run",
@@ -2702,7 +2702,7 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-run-create": {
-        "description": "Start a cloud agent run: a cloud sandbox runs a coding agent on your prompt in a GitHub repository and, by default, opens a pull request. This starts a billed sandbox. Compute is billed per second for the selected size until the run stops, and model usage is billed according to the inference mode. Only start a run when the user asked for one. The shortest call is `prompt` plus `profile` (a profile ID or name that holds the repository and the other defaults). Without a profile, send `prompt` and `repository`. The call returns at once with a `queued` run. Keep the `id`, then poll cloud-agents-run-get until the status is `completed`, `failed` or `cancelled`. This tool cannot send an idempotency key, so every call starts a new run. Do not call it again after a timeout or an unclear error: first check cloud-agents-run-list for the run. A 429 error means the project is at its concurrency, rate or usage limit, so wait before you try again.",
+        "description": "Start a cloud agent run: a cloud sandbox runs a coding agent on your prompt in a GitHub repository and, by default, opens a pull request. This starts a billed sandbox. Compute is billed per second for the selected size until the sandbox stops, and model usage is billed according to the inference mode. Only start a run when the user asked for one. The shortest call is `prompt` plus `preset` (a preset ID or name that holds the repository and the other defaults). Without a preset, send `prompt` and `repositories`, a list with one item such as `[{\"name\": \"acme/web\"}]`. The call returns at once with a `queued` run. Keep the `id`, then poll cloud-agents-run-get until the status is `idle` or `done`. The sandbox stops after `idle_minutes` (1 to 120, default 10) with no activity, and a shorter wait costs less compute. Send `output_schema` (a JSON Schema object) to get a structured result in `result.output`. This tool cannot send an idempotency key, so every call starts a new run. Do not call it again after a timeout or an unclear error: first check cloud-agents-run-list for the run. A 429 error means the project is at its concurrency, rate or usage limit, so wait before you try again.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "Start cloud agent run",
@@ -2734,7 +2734,7 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-run-get": {
-        "description": "Get one run by ID: its status, stop reason, error, configuration, pull request URLs, summary and cost. Use it to poll a run after cloud-agents-run-create. `queued` and `running` are active. `completed`, `failed` and `cancelled` mean the run stopped, and `stop_reason` says why. `result.pr_url` is the pull request and `result.summary` is the agent's own summary. `cost.final` is false while the cost can still change. Poll every 15 to 30 seconds, not faster.",
+        "description": "Get one run by ID: its status, status reason, status detail, configuration, pull request URLs, summary, structured output and cost. Use it to poll a run after cloud-agents-run-create. `queued` and `running` are active. `idle` means the sandbox stopped and a message continues the run. `done` means the run is final. `status_reason` says why (`turn_closed`, `timed_out`, `credit_spent`, `provision_failed`, `unexpected_failure`, `finished`, `closed`, `cancelled`), and `status_detail` explains it in one sentence. An `idle` run with a failure reason can still be continued. `result.pr_url` is the pull request, `result.summary` is the agent's own summary, and `result.output` is the structured result when the run has an `output_schema`. `cost.final` is false while the cost can still change. Poll every 15 to 30 seconds, not faster.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "Get cloud agent run",
@@ -2750,7 +2750,7 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-run-list": {
-        "description": "List the runs of the project, newest first. Filter by `status`, `profile_id`, `repository`, `tag`, or a creation time range. Each row is a short form of the run. Use cloud-agents-run-get for the configuration, the agent sessions and the full cost of one run.",
+        "description": "List the runs of the project, newest first. Filter by `status` (`queued`, `running`, `idle` or `done`), `preset_id`, `repository`, `tag`, or a creation time range. A status filter covers the newest 1,000 matching runs. Each row is a short form of the run. Use cloud-agents-run-get for the configuration, the agent sessions and the full cost of one run.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "List cloud agent runs",
@@ -2766,7 +2766,7 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-run-message": {
-        "description": "Send a follow-up message to a run. A running agent gets the message in its current session. A run that stopped starts a new agent session with the message, which starts a billed sandbox again and moves the run back to `queued`. `resumed` in the response says which of the two happened. Use it to ask for changes to the pull request or to continue a failed, timed out or cancelled run in the same repository state. A run that uses the subscription of the user who started it accepts messages from that user only. Each call sends one more message, so do not repeat a call that may have succeeded.",
+        "description": "Send a follow-up message to a run. A running agent gets the message in its current session. A message to an `idle` run starts a new agent session, which starts a billed sandbox again and moves the run back to `queued`. `resumed` in the response says which of the two happened. Use it to ask for changes to the pull request, or to continue an `idle` run that waited, timed out or failed, in the same repository state. A `done` run is final, and the call fails with status 409 and the code `run_done`: start a new run instead. A run that uses the subscription of the user who started it accepts messages from that user only. Each call sends one more message, so do not repeat a call that may have succeeded.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "Send message to cloud agent run",
@@ -2798,7 +2798,7 @@
         "feature_flag_behavior": "enable"
     },
     "cloud-agents-usage-summary": {
-        "description": "Get cost and usage totals for the runs created in a date range, with one bucket for each UTC day or for each profile. The default range is the last 30 days and the longest range is 366 days. Use it for spend questions across many runs. Use cloud-agents-run-usage for one run.",
+        "description": "Get cost and usage totals for the runs created in a date range, with one bucket for each UTC day or for each preset (`group_by=preset`). The default range is the last 30 days and the longest range is 366 days. Use it for spend questions across many runs. Use cloud-agents-run-usage for one run.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "Get cloud agents usage summary",

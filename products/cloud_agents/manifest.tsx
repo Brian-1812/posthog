@@ -9,8 +9,8 @@ export const manifest: ProductManifest = {
     urls: {
         cloudAgents: (): string => '/cloud-agents',
         cloudAgentRun: (id: string): string => `/cloud-agents/runs/${id}`,
-        cloudAgentProfiles: (): string => '/cloud-agents/profiles',
-        cloudAgentProfile: (id: string | 'new'): string => `/cloud-agents/profiles/${id}`,
+        cloudAgentPresets: (): string => '/cloud-agents/presets',
+        cloudAgentPreset: (id: string | 'new'): string => `/cloud-agents/presets/${id}`,
         cloudAgentsUsage: (): string => '/cloud-agents/usage',
         cloudAgentsSettings: (): string => '/cloud-agents/settings',
     },
@@ -32,18 +32,18 @@ export const manifest: ProductManifest = {
             layout: 'app-container',
             iconType: 'cloud_agent',
         },
-        CloudAgentProfiles: {
-            name: 'Cloud agent profiles',
+        CloudAgentPresets: {
+            name: 'Cloud agent presets',
             description:
                 'Send a prompt and a repository. A coding agent works in a cloud sandbox and opens a pull request.',
-            import: () => import('./frontend/scenes/CloudAgentProfilesScene'),
+            import: () => import('./frontend/scenes/CloudAgentPresetsScene'),
             projectBased: true,
             layout: 'app-container',
             iconType: 'cloud_agent',
         },
-        CloudAgentProfile: {
-            name: 'Cloud agent profile',
-            import: () => import('./frontend/scenes/CloudAgentProfileScene'),
+        CloudAgentPreset: {
+            name: 'Cloud agent preset',
+            import: () => import('./frontend/scenes/CloudAgentPresetScene'),
             projectBased: true,
             layout: 'app-container',
             iconType: 'cloud_agent',
@@ -69,8 +69,8 @@ export const manifest: ProductManifest = {
     },
     routes: {
         '/cloud-agents': ['CloudAgents', 'cloudAgents'],
-        '/cloud-agents/profiles': ['CloudAgentProfiles', 'cloudAgentProfiles'],
-        '/cloud-agents/profiles/:id': ['CloudAgentProfile', 'cloudAgentProfile'],
+        '/cloud-agents/presets': ['CloudAgentPresets', 'cloudAgentPresets'],
+        '/cloud-agents/presets/:id': ['CloudAgentPreset', 'cloudAgentPreset'],
         '/cloud-agents/usage': ['CloudAgentsUsage', 'cloudAgentsUsage'],
         '/cloud-agents/settings': ['CloudAgentsSettings', 'cloudAgentsSettings'],
         '/cloud-agents/runs/:id': ['CloudAgentRun', 'cloudAgentRun'],
@@ -94,8 +94,8 @@ export const manifest: ProductManifest = {
             sceneKeys: [
                 'CloudAgents',
                 'CloudAgentRun',
-                'CloudAgentProfiles',
-                'CloudAgentProfile',
+                'CloudAgentPresets',
+                'CloudAgentPreset',
                 'CloudAgentsUsage',
                 'CloudAgentsSettings',
             ],

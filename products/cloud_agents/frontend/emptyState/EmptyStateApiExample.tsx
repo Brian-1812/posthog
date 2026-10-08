@@ -9,7 +9,7 @@ export function EmptyStateApiExample(): JSX.Element {
             </p>
             <CurlSnippet
                 surface="empty_state"
-                body={{ repository: 'acme/web', prompt: 'Add a dark mode toggle to the settings page' }}
+                body={{ repositories: [{ name: 'acme/web' }], prompt: 'Add a dark mode toggle to the settings page' }}
             />
         </div>
     )

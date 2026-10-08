@@ -7,7 +7,7 @@ import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 
 import { CloudAgentsTabKey, CloudAgentsTabs } from './CloudAgentsTabs'
 
-/** The header and the tab bar that the Runs, Profiles, Usage and Settings scenes share. */
+/** The header and the tab bar that the Runs, Presets, Usage and Settings scenes share. */
 export function CloudAgentsSceneShell({
     activeTab,
     actions,

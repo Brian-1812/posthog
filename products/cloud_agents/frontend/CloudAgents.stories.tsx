@@ -10,12 +10,12 @@ import { toPaginatedResponse } from '~/mocks/handlers'
 
 import type {
     CloudAgentCatalogApi,
+    CloudAgentPresetApi,
     CloudAgentRunApi,
     CloudAgentRunEventsApi,
     CloudAgentSettingsApi,
     CloudAgentSizeApi,
     CloudAgentUsageSummaryApi,
-    ProfileApi,
 } from './generated/api.schemas'
 import { NEW_RUN_SEARCH_PARAM } from './logics/cloudAgentsNewRunLogic'
 
@@ -45,29 +45,33 @@ const catalog: CloudAgentCatalogApi = {
 }
 
 const settings: CloudAgentSettingsApi = {
-    repository: 'acme/web',
-    branch: null,
+    repositories: [{ name: 'acme/web', initial_branch: null }],
     model: null,
+    reasoning_effort: null,
     size: '4x16',
     inference: 'auto',
     instructions: 'Run pnpm test before you open the pull request.',
-    default_profile: null,
+    idle_minutes: null,
+    output_schema: null,
+    default_preset: null,
     max_concurrent_runs: 5,
     create_rate_per_hour: 60,
     updated_at: '2026-09-01T09:00:00Z',
 }
 
-const profiles: ProfileApi[] = [
+const presets: CloudAgentPresetApi[] = [
     {
         id: '0199a001-0000-7000-8000-000000000001',
         name: 'dependency-updates',
         description: 'Updates the dependencies each night and fixes what breaks.',
-        repository: 'acme/web',
-        branch: 'main',
+        repositories: [{ name: 'acme/web', initial_branch: 'main' }],
         model: null,
+        reasoning_effort: 'medium',
         size: '4x16',
         inference: 'posthog',
         instructions: 'Update one package group in each pull request. Run the full test suite.',
+        idle_minutes: 5,
+        output_schema: null,
         tags: ['nightly', 'dependencies'],
         created_by: 1,
         created_at: '2026-08-20T10:00:00Z',
@@ -77,12 +81,18 @@ const profiles: ProfileApi[] = [
         id: '0199a001-0000-7000-8000-000000000002',
         name: 'flaky-test-fixer',
         description: 'Finds the cause of a flaky test and fixes it.',
-        repository: 'acme/api',
-        branch: null,
+        repositories: [{ name: 'acme/api', initial_branch: null }],
         model: 'claude-opus',
+        reasoning_effort: 'high',
         size: '8x32',
         inference: 'own_subscription',
         instructions: null,
+        idle_minutes: null,
+        output_schema: {
+            type: 'object',
+            properties: { cause: { type: 'string' }, fixed: { type: 'boolean' } },
+            required: ['cause', 'fixed'],
+        },
         tags: ['ci'],
         created_by: 1,
         created_at: '2026-08-28T10:00:00Z',
@@ -92,12 +102,14 @@ const profiles: ProfileApi[] = [
         id: '0199a001-0000-7000-8000-000000000003',
         name: 'docs-sync',
         description: '',
-        repository: null,
-        branch: null,
+        repositories: null,
         model: null,
+        reasoning_effort: null,
         size: null,
         inference: null,
         instructions: null,
+        idle_minutes: null,
+        output_schema: null,
         tags: [],
         created_by: 1,
         created_at: '2026-09-02T10:00:00Z',
@@ -107,32 +119,32 @@ const profiles: ProfileApi[] = [
 
 const makeRun = (overrides: Partial<CloudAgentRunApi>): CloudAgentRunApi => ({
     id: '0199b001-0000-7000-8000-000000000001',
-    status: 'completed',
-    stop_reason: 'done',
-    error: null,
+    status: 'idle',
+    status_reason: 'turn_closed',
+    status_detail: null,
     created_at: '2026-09-14T08:00:00Z',
     started_at: '2026-09-14T08:00:20Z',
-    completed_at: '2026-09-14T08:19:40Z',
+    ended_at: '2026-09-14T08:19:40Z',
     updated_at: '2026-09-14T08:19:40Z',
     prompt: 'Add a dark mode toggle to the settings page and remember the choice for each user.',
-    repository: 'acme/web',
-    branch: 'cloud-agents/dark-mode-toggle',
-    profile: null,
+    repositories: [{ name: 'acme/web', initial_branch: 'cloud-agents/dark-mode-toggle' }],
+    preset: null,
     config: {
         model: 'claude-sonnet',
+        reasoning_effort: null,
         size: sizeNamed('4x16'),
         inference: 'posthog',
         create_pr: true,
-        pr_mode: 'draft',
-        max_duration_minutes: 120,
-        max_cost_usd: null,
+        idle_minutes: 10,
+        output_schema: null,
         instructions_applied: true,
     },
     result: {
         pr_url: 'https://github.com/acme/web/pull/482',
         pr_urls: ['https://github.com/acme/web/pull/482'],
         summary:
-            'Added a dark mode toggle to the settings page. The choice is saved to the user profile and applied on load. All 214 tests pass.',
+            'Added a dark mode toggle to the settings page. The choice is saved to the user preset and applied on load. All 214 tests pass.',
+        output: null,
     },
     cost: {
         compute_usd: '0.1186',
@@ -145,7 +157,7 @@ const makeRun = (overrides: Partial<CloudAgentRunApi>): CloudAgentRunApi => ({
         final: true,
     },
     agent_sessions: [
-        { index: 1, status: 'completed', started_at: '2026-09-14T08:00:20Z', ended_at: '2026-09-14T08:19:40Z' },
+        { index: 1, status: 'ended', started_at: '2026-09-14T08:00:20Z', ended_at: '2026-09-14T08:19:40Z' },
     ],
     tags: [],
     metadata: {},
@@ -159,16 +171,21 @@ const completedRun = makeRun({})
 const runningRun = makeRun({
     id: '0199b001-0000-7000-8000-000000000002',
     status: 'running',
-    stop_reason: null,
+    status_reason: null,
     created_at: '2026-09-14T11:47:40Z',
     started_at: '2026-09-14T11:48:00Z',
-    completed_at: null,
+    ended_at: null,
     prompt: 'Find why the checkout integration test is flaky and fix the cause.',
-    repository: 'acme/api',
-    branch: 'cloud-agents/flaky-checkout-test',
-    profile: { id: profiles[1].id, name: profiles[1].name },
-    config: { ...completedRun.config, size: sizeNamed('8x32'), model: 'claude-opus' },
-    result: { pr_url: null, pr_urls: [], summary: null },
+    repositories: [{ name: 'acme/api', initial_branch: 'cloud-agents/flaky-checkout-test' }],
+    preset: { id: presets[1].id, name: presets[1].name },
+    config: {
+        ...completedRun.config,
+        size: sizeNamed('8x32'),
+        model: 'claude-opus',
+        reasoning_effort: 'high',
+        idle_minutes: 5,
+    },
+    result: { pr_url: null, pr_urls: [], summary: null, output: null },
     cost: {
         compute_usd: '0.1472',
         inference_usd: '0.3105',
@@ -185,16 +202,16 @@ const runningRun = makeRun({
 
 const failedRun = makeRun({
     id: '0199b001-0000-7000-8000-000000000003',
-    status: 'failed',
-    stop_reason: 'error',
-    error: 'The agent could not push to the repository because the branch is protected.',
+    status: 'idle',
+    status_reason: 'unexpected_failure',
+    status_detail: 'The run failed. Send a message to try again, or start a new run.',
     created_at: '2026-09-13T16:00:00Z',
     started_at: '2026-09-13T16:00:25Z',
-    completed_at: '2026-09-13T16:07:05Z',
+    ended_at: '2026-09-13T16:07:05Z',
     prompt: 'Rename the billing module to payments in the whole repository.',
-    branch: 'main',
+    repositories: [{ name: 'acme/web', initial_branch: 'main' }],
     config: { ...completedRun.config, size: sizeNamed('2x8') },
-    result: { pr_url: null, pr_urls: [], summary: null },
+    result: { pr_url: null, pr_urls: [], summary: null, output: null },
     cost: {
         compute_usd: '0.0204',
         inference_usd: '0.1130',
@@ -206,7 +223,7 @@ const failedRun = makeRun({
         final: true,
     },
     agent_sessions: [
-        { index: 1, status: 'failed', started_at: '2026-09-13T16:00:25Z', ended_at: '2026-09-13T16:07:05Z' },
+        { index: 1, status: 'ended', started_at: '2026-09-13T16:00:25Z', ended_at: '2026-09-13T16:07:05Z' },
     ],
 })
 
@@ -214,14 +231,23 @@ const ownSubscriptionRun = makeRun({
     id: '0199b001-0000-7000-8000-000000000004',
     created_at: '2026-09-12T09:30:00Z',
     started_at: '2026-09-12T09:30:18Z',
-    completed_at: '2026-09-12T10:12:18Z',
+    ended_at: '2026-09-12T10:12:18Z',
     prompt: 'Move the date helpers to the shared utils package and update each import.',
-    branch: 'cloud-agents/shared-date-helpers',
-    config: { ...completedRun.config, inference: 'own_subscription', size: sizeNamed('4x8') },
+    repositories: [{ name: 'acme/web', initial_branch: 'cloud-agents/shared-date-helpers' }],
+    config: {
+        ...completedRun.config,
+        inference: 'own_subscription',
+        size: sizeNamed('4x8'),
+        output_schema: {
+            type: 'object',
+            properties: { moved_helpers: { type: 'integer' }, updated_imports: { type: 'integer' } },
+        },
+    },
     result: {
         pr_url: 'https://github.com/acme/web/pull/479',
         pr_urls: ['https://github.com/acme/web/pull/479'],
         summary: 'Moved 14 date helpers to the shared utils package and updated 63 imports.',
+        output: { moved_helpers: 14, updated_imports: 63 },
     },
     cost: {
         compute_usd: '0.1848',
@@ -234,22 +260,22 @@ const ownSubscriptionRun = makeRun({
         final: true,
     },
     agent_sessions: [
-        { index: 1, status: 'completed', started_at: '2026-09-12T09:30:18Z', ended_at: '2026-09-12T09:58:00Z' },
-        { index: 2, status: 'completed', started_at: '2026-09-12T10:01:00Z', ended_at: '2026-09-12T10:12:18Z' },
+        { index: 1, status: 'ended', started_at: '2026-09-12T09:30:18Z', ended_at: '2026-09-12T09:58:00Z' },
+        { index: 2, status: 'ended', started_at: '2026-09-12T10:01:00Z', ended_at: '2026-09-12T10:12:18Z' },
     ],
 })
 
 const queuedRun = makeRun({
     id: '0199b001-0000-7000-8000-000000000005',
     status: 'queued',
-    stop_reason: null,
+    status_reason: null,
     created_at: '2026-09-14T11:59:30Z',
     started_at: null,
-    completed_at: null,
+    ended_at: null,
     prompt: 'Update the dependencies in the mobile group.',
-    branch: null,
-    profile: { id: profiles[0].id, name: profiles[0].name },
-    result: { pr_url: null, pr_urls: [], summary: null },
+    repositories: [{ name: 'acme/web', initial_branch: null }],
+    preset: { id: presets[0].id, name: presets[0].name },
+    result: { pr_url: null, pr_urls: [], summary: null, output: null },
     cost: {
         compute_usd: '0',
         inference_usd: '0',
@@ -267,16 +293,15 @@ const queuedRun = makeRun({
 
 const cancelledRun = makeRun({
     id: '0199b001-0000-7000-8000-000000000006',
-    status: 'cancelled',
-    stop_reason: 'cancelled',
+    status: 'done',
+    status_reason: 'cancelled',
     created_at: '2026-09-11T13:00:00Z',
     started_at: '2026-09-11T13:00:22Z',
-    completed_at: '2026-09-11T13:03:02Z',
+    ended_at: '2026-09-11T13:03:02Z',
     prompt: 'Try the new image pipeline on the marketing site.',
-    repository: 'acme/marketing',
-    branch: null,
+    repositories: [{ name: 'acme/marketing', initial_branch: null }],
     config: { ...completedRun.config, size: sizeNamed('1x2') },
-    result: { pr_url: null, pr_urls: [], summary: null },
+    result: { pr_url: null, pr_urls: [], summary: null, output: null },
     cost: {
         compute_usd: '0.0029',
         inference_usd: '0.0210',
@@ -289,7 +314,36 @@ const cancelledRun = makeRun({
     },
 })
 
-const runs = [queuedRun, runningRun, completedRun, failedRun, ownSubscriptionRun, cancelledRun]
+const mergedRun = makeRun({
+    id: '0199b001-0000-7000-8000-000000000007',
+    status: 'done',
+    status_reason: 'finished',
+    status_detail: 'The pull request of the run was merged.',
+    created_at: '2026-09-10T09:00:00Z',
+    started_at: '2026-09-10T09:00:15Z',
+    ended_at: '2026-09-10T09:21:15Z',
+    prompt: 'Remove the unused feature flag checks from the onboarding flow.',
+    result: {
+        pr_url: 'https://github.com/acme/web/pull/470',
+        pr_urls: ['https://github.com/acme/web/pull/470'],
+        summary: 'Removed 6 flag checks from the onboarding flow.',
+        output: null,
+    },
+})
+
+const timedOutRun = makeRun({
+    id: '0199b001-0000-7000-8000-000000000008',
+    status: 'idle',
+    status_reason: 'timed_out',
+    status_detail: 'The run stopped because it reached its time limit. Send a message to continue.',
+    created_at: '2026-09-09T14:00:00Z',
+    started_at: '2026-09-09T14:00:20Z',
+    ended_at: '2026-09-09T16:00:20Z',
+    prompt: 'Migrate the legacy report exports to the new export service.',
+    result: { pr_url: null, pr_urls: [], summary: null, output: null },
+})
+
+const runs = [queuedRun, runningRun, completedRun, failedRun, ownSubscriptionRun, timedOutRun, mergedRun, cancelledRun]
 
 const sessionUpdate = (timestamp: string, update: Record<string, unknown>): Record<string, unknown> => ({
     type: 'notification',
@@ -360,14 +414,14 @@ const eventsFor = (run: CloudAgentRunApi): CloudAgentRunEventsApi => ({
                       sessionUpdate: 'tool_call',
                       toolCallId: 'call-2',
                       title: 'Bash',
-                      status: run.status === 'failed' ? 'failed' : 'completed',
+                      status: run.status_reason === 'unexpected_failure' ? 'failed' : 'completed',
                       rawInput: { command: 'git push origin HEAD' },
                   }),
-                  ...(run.result.summary || run.error
+                  ...(run.result.summary || run.status_detail
                       ? [
                             sessionUpdate(run.created_at, {
                                 sessionUpdate: 'agent_message_chunk',
-                                content: { type: 'text', text: run.result.summary ?? run.error },
+                                content: { type: 'text', text: run.result.summary ?? run.status_detail },
                             }),
                         ]
                       : []),
@@ -424,8 +478,8 @@ const cloudAgentsDecorator = (storyRuns: CloudAgentRunApi[]): ReturnType<typeof 
         get: {
             [`${BASE}/catalog/`]: catalog,
             [`${BASE}/settings/`]: settings,
-            [`${BASE}/profiles/`]: toPaginatedResponse(profiles),
-            [`${BASE}/profiles/:id/`]: profiles[0],
+            [`${BASE}/presets/`]: toPaginatedResponse(presets),
+            [`${BASE}/presets/:id/`]: presets[0],
             [`${BASE}/usage/`]: usage,
             [`${BASE}/runs/`]: toPaginatedResponse(storyRuns),
             [`${BASE}/runs/:id/`]: ({ params }) => {
@@ -491,19 +545,24 @@ export const RunFailed: Story = {
     parameters: { pageUrl: urls.cloudAgentRun(failedRun.id) },
 }
 
+export const RunDoneMerged: Story = {
+    decorators: [cloudAgentsDecorator(runs)],
+    parameters: { pageUrl: urls.cloudAgentRun(mergedRun.id) },
+}
+
 export const RunOnOwnSubscription: Story = {
     decorators: [cloudAgentsDecorator(runs)],
     parameters: { pageUrl: urls.cloudAgentRun(ownSubscriptionRun.id) },
 }
 
-export const Profiles: Story = {
+export const Presets: Story = {
     decorators: [cloudAgentsDecorator(runs)],
-    parameters: { pageUrl: urls.cloudAgentProfiles() },
+    parameters: { pageUrl: urls.cloudAgentPresets() },
 }
 
-export const ProfileEdit: Story = {
+export const PresetEdit: Story = {
     decorators: [cloudAgentsDecorator(runs)],
-    parameters: { pageUrl: urls.cloudAgentProfile(profiles[0].id) },
+    parameters: { pageUrl: urls.cloudAgentPreset(presets[0].id) },
 }
 
 export const Usage: Story = {

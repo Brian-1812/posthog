@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { Form } from 'kea-forms'
 
-import { LemonBanner, LemonButton, LemonInput, LemonModal, LemonSelect, LemonTextArea } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, LemonModal, LemonSelect, LemonTextArea } from '@posthog/lemon-ui'
 
 import { LemonField } from 'lib/lemon-ui/LemonField'
 
@@ -9,11 +9,13 @@ import { COST_EXAMPLE_MINUTES, cloudAgentsNewRunLogic } from '../logics/cloudAge
 import { BoxCostLine } from './BoxCostLine'
 import { BoxSizeSelect } from './BoxSizeSelect'
 import { InferenceModeSelect } from './InferenceModeSelect'
+import { RepositoryFields } from './RepositoryFields'
+import { RunOptionFields } from './RunOptionFields'
 
-/** The form that starts a run. A profile fills the fields, and each field can still change for this one run. */
+/** The form that starts a run. A preset fills the fields, and each field can still change for this one run. */
 export function NewRunModal(): JSX.Element {
-    const { isNewRunModalOpen, isNewRunSubmitting, newRun, newRunError, profiles } = useValues(cloudAgentsNewRunLogic)
-    const { closeNewRunModal, selectProfile, submitNewRun } = useActions(cloudAgentsNewRunLogic)
+    const { isNewRunModalOpen, isNewRunSubmitting, newRun, newRunError, presets } = useValues(cloudAgentsNewRunLogic)
+    const { closeNewRunModal, selectPreset, submitNewRun } = useActions(cloudAgentsNewRunLogic)
 
     return (
         <LemonModal
@@ -54,30 +56,23 @@ export function NewRunModal(): JSX.Element {
                     />
                 </LemonField>
                 <LemonField
-                    name="profile"
-                    label="Profile"
+                    name="preset"
+                    label="Preset"
                     showOptional
-                    help="A profile fills in the fields below. You can still change them for this run."
+                    help="A preset fills in the fields below. You can still change them for this run."
                 >
                     <LemonSelect
                         fullWidth
-                        value={newRun.profile}
-                        onChange={(profile) => selectProfile(profile)}
+                        value={newRun.preset}
+                        onChange={(preset) => selectPreset(preset)}
                         options={[
-                            { value: null, label: 'No profile' },
-                            ...(profiles ?? []).map((profile) => ({ value: profile.name, label: profile.name })),
+                            { value: null, label: 'No preset' },
+                            ...(presets ?? []).map((preset) => ({ value: preset.name, label: preset.name })),
                         ]}
-                        data-attr="cloud-agents-new-run-profile"
+                        data-attr="cloud-agents-new-run-preset"
                     />
                 </LemonField>
-                <div className="grid grid-cols-1 @min-[30rem]:grid-cols-2 gap-3">
-                    <LemonField name="repository" label="Repository">
-                        <LemonInput placeholder="owner/name" data-attr="cloud-agents-new-run-repository" />
-                    </LemonField>
-                    <LemonField name="branch" label="Branch" showOptional>
-                        <LemonInput placeholder="The default branch" data-attr="cloud-agents-new-run-branch" />
-                    </LemonField>
-                </div>
+                <RepositoryFields required dataAttrPrefix="cloud-agents-new-run" />
                 <LemonField name="size" label="Box size">
                     {({ value, onChange }) => (
                         <div className="flex flex-col gap-1">
@@ -105,6 +100,7 @@ export function NewRunModal(): JSX.Element {
                         />
                     )}
                 </LemonField>
+                <RunOptionFields emptyLabel="Default" dataAttrPrefix="cloud-agents-new-run" />
             </Form>
         </LemonModal>
     )

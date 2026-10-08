@@ -1,6 +1,6 @@
 import { CloudAgentsTabs } from '../components/CloudAgentsTabs'
 
-/** Keeps Profiles, Usage and Settings reachable while the empty state replaces the runs scene. */
+/** Keeps Presets, Usage and Settings reachable while the empty state replaces the runs scene. */
 export function EmptyStateTabs(): JSX.Element {
     return <CloudAgentsTabs activeTab="runs" />
 }

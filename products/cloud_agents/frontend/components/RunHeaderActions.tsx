@@ -25,7 +25,7 @@ export function RunHeaderActions(): JSX.Element | null {
                         LemonDialog.open({
                             title: 'Cancel this run?',
                             description:
-                                'The agent stops and the sandbox shuts down. You pay for the time used up to now. Work that the agent did not push is lost.',
+                                'The agent stops and the sandbox shuts down. You pay for the time used up to now. Work that the agent did not push is lost. A canceled run is done and cannot continue.',
                             primaryButton: {
                                 children: 'Cancel run',
                                 status: 'danger',

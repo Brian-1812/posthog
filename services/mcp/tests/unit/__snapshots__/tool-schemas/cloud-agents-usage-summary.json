@@ -15,8 +15,8 @@
         },
         "group_by": {
             "default": "day",
-            "description": "`day` gives one bucket for each UTC day. `profile` gives one bucket for each profile.\n\n* `day` - Day\n* `profile` - Profile",
-            "enum": ["day", "profile"],
+            "description": "`day` gives one bucket for each UTC day. `preset` gives one bucket for each preset.\n\n* `day` - Day\n* `preset` - Preset",
+            "enum": ["day", "preset"],
             "type": "string"
         }
     },

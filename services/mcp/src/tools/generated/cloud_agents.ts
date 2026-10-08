@@ -98,7 +98,7 @@ const cloudAgentsPresetCreate = (): ToolBase<
             path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/presets/`,
             body,
         })
-        return await withPostHogUrl(context, result, `/cloud-agents/profiles/${result.id}`)
+        return await withPostHogUrl(context, result, `/cloud-agents/presets/${result.id}`)
     },
 })
 
@@ -106,7 +106,7 @@ const CloudAgentsPresetGetSchema = () => {
     const CloudAgentsPresetsRetrieveParams = orvalSchemas.CloudAgentsPresetsRetrieveParams()
     return CloudAgentsPresetsRetrieveParams.omit({ project_id: true }).extend({
         id: CloudAgentsPresetsRetrieveParams.shape['id'].describe(
-            'ID of the profile (a UUID). A profile name is not accepted here.'
+            'ID of the preset (a UUID). A preset name is not accepted here.'
         ),
     })
 }
@@ -123,7 +123,7 @@ const cloudAgentsPresetGet = (): ToolBase<
             method: 'GET',
             path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/presets/${encodeURIComponent(String(params.id))}/`,
         })
-        return await withPostHogUrl(context, result, `/cloud-agents/profiles/${result.id}`)
+        return await withPostHogUrl(context, result, `/cloud-agents/presets/${result.id}`)
     },
 })
 
@@ -160,7 +160,7 @@ const cloudAgentsPresetList = (): ToolBase<
                 ...filtered,
                 results: await Promise.all(
                     (filtered.results ?? []).map((item) =>
-                        withPostHogUrl(context, item, `/cloud-agents/profiles/${item.id}`)
+                        withPostHogUrl(context, item, `/cloud-agents/presets/${item.id}`)
                     )
                 ),
             },
@@ -205,10 +205,10 @@ const CloudAgentsRunCreateSchema = () => {
             'The task for the agent, in plain language. Say what to change and how to know it is done. The agent sees only this text, the instructions, and the repository.'
         ),
         size: CloudAgentsRunsCreateBody.shape['size'].describe(
-            'Sandbox size, as `<vCPU>x<memory in GiB>`. A larger size costs more per second. Leave it out to use the default of the profile or the project. See cloud-agents-catalog for prices.'
+            'Sandbox size, as `<vCPU>x<memory in GiB>`. A larger size costs more per second. Leave it out to use the default of the preset or the project. See cloud-agents-catalog for prices.'
         ),
         model: CloudAgentsRunsCreateBody.shape['model'].describe(
-            'Model ID from cloud-agents-catalog. Leave it out to use the default of the profile or the project.'
+            'Model ID from cloud-agents-catalog. Leave it out to use the default of the preset or the project.'
         ),
     })
 }
@@ -275,6 +275,8 @@ const cloudAgentsRunCreate = (): ToolBase<
             'config.model',
             'config.size',
             'config.inference',
+            'config.reasoning_effort',
+            'config.idle_minutes',
             'config.create_pr',
             'tags',
         ]) as typeof result
@@ -421,6 +423,7 @@ const cloudAgentsRunMessage = (): ToolBase<ReturnType<typeof CloudAgentsRunMessa
             'run.id',
             'run.status',
             'run.status_reason',
+            'run.status_detail',
             'run.agent_sessions',
         ]) as typeof result
         return filtered

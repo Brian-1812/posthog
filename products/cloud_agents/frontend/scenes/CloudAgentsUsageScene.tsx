@@ -47,7 +47,7 @@ export function CloudAgentsUsageScene(): JSX.Element {
                     onChange={setGroupBy}
                     options={[
                         { value: 'day', label: 'By day' },
-                        { value: 'profile', label: 'By profile' },
+                        { value: 'preset', label: 'By preset' },
                     ]}
                     data-attr="cloud-agents-usage-group-by"
                 />

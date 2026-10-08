@@ -5,8 +5,17 @@ import { LemonBanner, LemonButton, LemonCard, LemonTextArea } from '@posthog/lem
 import { cloudAgentRunLogic } from '../logics/cloudAgentRunLogic'
 
 export function RunFollowupComposer(): JSX.Element {
-    const { followupText, followupSending, followupError, isActive } = useValues(cloudAgentRunLogic)
+    const { followupText, followupSending, followupError, isActive, isDone } = useValues(cloudAgentRunLogic)
     const { setFollowupText, sendFollowup } = useActions(cloudAgentRunLogic)
+
+    if (isDone) {
+        return (
+            <LemonCard hoverEffect={false} className="flex flex-col gap-1 p-4" data-attr="cloud-agents-run-done">
+                <h3 className="m-0 text-base font-semibold">This run is done</h3>
+                <p className="m-0 text-secondary">This run is done. Start a new run to continue the work.</p>
+            </LemonCard>
+        )
+    }
 
     return (
         <LemonCard hoverEffect={false} className="flex flex-col gap-2 p-4" data-attr="cloud-agents-run-followup">
@@ -14,7 +23,7 @@ export function RunFollowupComposer(): JSX.Element {
             <p className="m-0 text-secondary text-xs">
                 {isActive
                     ? 'The agent gets your message in its current session.'
-                    : 'This run stopped. A message resumes it in a new session on the same branch, and the new session adds to the cost.'}
+                    : 'The sandbox of this run stopped. A message continues the run in a new session on the same branch, and the new session adds to the cost.'}
             </p>
             {followupError && <LemonBanner type="error">{followupError}</LemonBanner>}
             <LemonTextArea
@@ -40,7 +49,7 @@ export function RunFollowupComposer(): JSX.Element {
                 }
                 data-attr="cloud-agents-run-followup-send"
             >
-                {isActive ? 'Send' : 'Send and resume'}
+                {isActive ? 'Send' : 'Send and continue'}
             </LemonButton>
         </LemonCard>
     )

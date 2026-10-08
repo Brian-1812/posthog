@@ -13,7 +13,7 @@ import {
 import type { CloudAgentRunApi, CloudAgentRunEventsApi } from '../generated/api.schemas'
 import { describeRunError } from '../utils/errors'
 import { TimelineRow, buildTimeline } from '../utils/runEvents'
-import { isRunActive } from '../utils/runStatus'
+import { isRunActive, isRunDone } from '../utils/runStatus'
 
 export const RUN_POLL_INTERVAL_MS = 4000
 export const TIMELINE_PAGE_SIZE = 100
@@ -37,6 +37,7 @@ export interface cloudAgentRunLogicValues {
     followupText: string
     hiddenTimelineRowCount: number
     isActive: boolean
+    isDone: boolean
     run: CloudAgentRunApi | null
     runEvents: CloudAgentRunEventsApi | null
     runEventsLoadFailed: boolean
@@ -129,6 +130,7 @@ export interface cloudAgentRunLogicMeta {
     key: string
     __keaTypeGenInternalSelectorTypes: {
         isActive: (run: CloudAgentRunApi | null) => boolean
+        isDone: (run: CloudAgentRunApi | null) => boolean
         timelineRows: (runEvents: CloudAgentRunEventsApi | null) => TimelineRow[]
         visibleTimelineRows: (timelineRows: TimelineRow[], timelineLimit: number) => TimelineRow[]
         hiddenTimelineRowCount: (timelineRows: TimelineRow[], timelineLimit: number) => number
@@ -204,6 +206,7 @@ export const cloudAgentRunLogic = kea<cloudAgentRunLogicType>([
     }),
     selectors({
         isActive: [(s) => [s.run], (run: CloudAgentRunApi | null): boolean => !!run && isRunActive(run.status)],
+        isDone: [(s) => [s.run], (run: CloudAgentRunApi | null): boolean => !!run && isRunDone(run.status)],
         timelineRows: [
             (s) => [s.runEvents],
             (runEvents: CloudAgentRunEventsApi | null): TimelineRow[] =>
@@ -276,6 +279,10 @@ export const cloudAgentRunLogic = kea<cloudAgentRunLogicType>([
                     actions.sendFollowupDone(
                         describeRunError(error, 'Could not send the message. Try again in a moment.')
                     )
+                    // The run finished for good while the page showed it as idle, so show it as done.
+                    if ((error as { code?: string | null }).code === 'run_done') {
+                        actions.loadRun()
+                    }
                 }
             },
         }

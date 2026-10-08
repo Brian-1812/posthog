@@ -1,11 +1,11 @@
 import { useActions, useValues } from 'kea'
 import { Form } from 'kea-forms'
 
-import { LemonButton, LemonInput, LemonSelect, LemonSkeleton, LemonTextArea } from '@posthog/lemon-ui'
+import { LemonButton, LemonSelect, LemonSkeleton, LemonTextArea } from '@posthog/lemon-ui'
 
 import { LemonField } from 'lib/lemon-ui/LemonField'
 
-import { cloudAgentProfilesLogic } from '../logics/cloudAgentProfilesLogic'
+import { cloudAgentPresetsLogic } from '../logics/cloudAgentPresetsLogic'
 import { COST_EXAMPLE_MINUTES } from '../logics/cloudAgentsNewRunLogic'
 import { cloudAgentsSettingsLogic } from '../logics/cloudAgentsSettingsLogic'
 import { BoxCostLine } from './BoxCostLine'
@@ -13,6 +13,8 @@ import { BoxSizeSelect } from './BoxSizeSelect'
 import { InferenceModeSelect } from './InferenceModeSelect'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { ModelSelect } from './ModelSelect'
+import { RepositoryFields } from './RepositoryFields'
+import { RunOptionFields } from './RunOptionFields'
 import { SettingsSection } from './SettingsSection'
 import { TeamLimits } from './TeamLimits'
 
@@ -20,12 +22,12 @@ export function TeamDefaultsSection(): JSX.Element {
     const { settings, settingsLoading, settingsLoadFailed, isTeamDefaultsSubmitting, teamDefaultsChanged } =
         useValues(cloudAgentsSettingsLogic)
     const { loadSettings, submitTeamDefaults } = useActions(cloudAgentsSettingsLogic)
-    const { profiles } = useValues(cloudAgentProfilesLogic)
+    const { presets } = useValues(cloudAgentPresetsLogic)
 
     return (
         <SettingsSection
             title="Team defaults"
-            description="A run uses these values when the request and its profile leave a field out."
+            description="A run uses these values when the request and its preset leave a field out."
             data-attr="cloud-agents-team-defaults"
         >
             {settings === null && settingsLoadFailed ? (
@@ -39,14 +41,7 @@ export function TeamDefaultsSection(): JSX.Element {
                     enableFormOnSubmit
                     className="flex max-w-180 flex-col gap-3"
                 >
-                    <div className="grid grid-cols-1 gap-3 @min-[40rem]/main-content:grid-cols-2">
-                        <LemonField name="repository" label="Repository" showOptional>
-                            <LemonInput placeholder="owner/name" data-attr="cloud-agents-defaults-repository" />
-                        </LemonField>
-                        <LemonField name="branch" label="Branch" showOptional>
-                            <LemonInput placeholder="The default branch" />
-                        </LemonField>
-                    </div>
+                    <RepositoryFields dataAttrPrefix="cloud-agents-defaults" />
                     <LemonField name="size" label="Box size">
                         {({ value, onChange }) => (
                             <div className="flex flex-col gap-1">
@@ -74,11 +69,12 @@ export function TeamDefaultsSection(): JSX.Element {
                             )}
                         </LemonField>
                     </div>
+                    <RunOptionFields emptyLabel="PostHog default" dataAttrPrefix="cloud-agents-defaults" />
                     <LemonField
-                        name="default_profile"
-                        label="Default profile"
+                        name="default_preset"
+                        label="Default preset"
                         showOptional
-                        help="Runs that name no profile use this one."
+                        help="Runs that name no preset use this one."
                     >
                         {({ value, onChange }) => (
                             <LemonSelect
@@ -86,13 +82,13 @@ export function TeamDefaultsSection(): JSX.Element {
                                 value={value}
                                 onChange={onChange}
                                 options={[
-                                    { value: null, label: 'No default profile' },
-                                    ...(profiles ?? []).map((profile) => ({
-                                        value: profile.id,
-                                        label: profile.name,
+                                    { value: null, label: 'No default preset' },
+                                    ...(presets ?? []).map((preset) => ({
+                                        value: preset.id,
+                                        label: preset.name,
                                     })),
                                 ]}
-                                data-attr="cloud-agents-defaults-profile"
+                                data-attr="cloud-agents-defaults-preset"
                             />
                         )}
                     </LemonField>

@@ -18,68 +18,70 @@ import { BoxSizeSelect } from '../components/BoxSizeSelect'
 import { InferenceModeSelect } from '../components/InferenceModeSelect'
 import { LoadErrorBanner } from '../components/LoadErrorBanner'
 import { ModelSelect } from '../components/ModelSelect'
-import { ProfileApiSnippet } from '../components/ProfileApiSnippet'
-import { CloudAgentProfileLogicProps, cloudAgentProfileLogic } from '../logics/cloudAgentProfileLogic'
+import { PresetApiSnippet } from '../components/PresetApiSnippet'
+import { RepositoryFields } from '../components/RepositoryFields'
+import { RunOptionFields } from '../components/RunOptionFields'
+import { CloudAgentPresetLogicProps, cloudAgentPresetLogic } from '../logics/cloudAgentPresetLogic'
 import { COST_EXAMPLE_MINUTES } from '../logics/cloudAgentsNewRunLogic'
 
-export const scene: SceneExport<CloudAgentProfileLogicProps> = {
-    component: CloudAgentProfileScene,
-    logic: cloudAgentProfileLogic,
+export const scene: SceneExport<CloudAgentPresetLogicProps> = {
+    component: CloudAgentPresetScene,
+    logic: cloudAgentPresetLogic,
     paramsToProps: ({ params: { id } }) => ({ id }),
     productKey: ProductKey.CLOUD_AGENTS,
 }
 
-export function CloudAgentProfileScene({ id }: CloudAgentProfileLogicProps): JSX.Element {
+export function CloudAgentPresetScene({ id }: CloudAgentPresetLogicProps): JSX.Element {
     const enabled = useFeatureFlag('CLOUD_AGENTS')
-    const logic = cloudAgentProfileLogic({ id })
-    const { isNew, profile, profileLoading, profileLoadError, profileForm, isProfileFormSubmitting } = useValues(logic)
-    const { loadProfile, submitProfileForm } = useActions(logic)
+    const logic = cloudAgentPresetLogic({ id })
+    const { isNew, preset, presetLoading, presetLoadError, presetForm, isPresetFormSubmitting } = useValues(logic)
+    const { loadPreset, submitPresetForm } = useActions(logic)
 
-    if (!enabled || profileLoadError === 'not_found') {
-        return <NotFound object="profile" caption="Check the link, or open the list of profiles to find it." />
+    if (!enabled || presetLoadError === 'not_found') {
+        return <NotFound object="preset" caption="Check the link, or open the list of presets to find it." />
     }
 
-    const waitingForProfile = !isNew && profile === null
+    const waitingForPreset = !isNew && preset === null
 
     return (
         <SceneContent>
             <SceneTitleSection
-                name={isNew ? 'New profile' : (profile?.name ?? 'Profile')}
-                description="A profile is a saved setup for runs. The API can start a run from it with only a prompt."
+                name={isNew ? 'New preset' : (preset?.name ?? 'Preset')}
+                description="A preset is a saved setup for runs. The API can start a run from it with only a prompt."
                 resourceType={{ type: 'cloud_agent' }}
-                forceBackTo={{ key: 'cloud-agent-profiles', name: 'Profiles', path: urls.cloudAgentProfiles() }}
+                forceBackTo={{ key: 'cloud-agent-presets', name: 'Presets', path: urls.cloudAgentPresets() }}
                 actions={
                     <>
                         <LemonButton
                             type="secondary"
                             size="small"
-                            to={urls.cloudAgentProfiles()}
-                            data-attr="cloud-agents-profile-cancel"
+                            to={urls.cloudAgentPresets()}
+                            data-attr="cloud-agents-preset-cancel"
                         >
                             Cancel
                         </LemonButton>
                         <LemonButton
                             type="primary"
                             size="small"
-                            onClick={submitProfileForm}
-                            loading={isProfileFormSubmitting}
+                            onClick={submitPresetForm}
+                            loading={isPresetFormSubmitting}
                             disabledReason={
-                                isProfileFormSubmitting
-                                    ? 'Saving the profile'
-                                    : waitingForProfile
-                                      ? 'The profile is not loaded yet'
+                                isPresetFormSubmitting
+                                    ? 'Saving the preset'
+                                    : waitingForPreset
+                                      ? 'The preset is not loaded yet'
                                       : undefined
                             }
-                            data-attr="cloud-agents-profile-save"
+                            data-attr="cloud-agents-preset-save"
                         >
-                            Save profile
+                            Save preset
                         </LemonButton>
                     </>
                 }
             />
-            {waitingForProfile && profileLoadError === 'failed' ? (
-                <LoadErrorBanner what="this profile" onRetry={loadProfile} retrying={profileLoading} />
-            ) : waitingForProfile ? (
+            {waitingForPreset && presetLoadError === 'failed' ? (
+                <LoadErrorBanner what="this preset" onRetry={loadPreset} retrying={presetLoading} />
+            ) : waitingForPreset ? (
                 <div className="flex flex-col gap-3">
                     <LemonSkeleton className="h-10" />
                     <LemonSkeleton className="h-48" />
@@ -87,29 +89,19 @@ export function CloudAgentProfileScene({ id }: CloudAgentProfileLogicProps): JSX
             ) : (
                 <div className="grid grid-cols-1 items-start gap-4 @min-[56rem]/main-content:grid-cols-3">
                     <Form
-                        logic={cloudAgentProfileLogic}
+                        logic={cloudAgentPresetLogic}
                         props={{ id }}
-                        formKey="profileForm"
+                        formKey="presetForm"
                         enableFormOnSubmit
                         className="flex min-w-0 flex-col gap-3 @min-[56rem]/main-content:col-span-2"
                     >
-                        <LemonField name="name" label="Name" help="API calls use this name to pick the profile.">
-                            <LemonInput
-                                placeholder="nightly-dependency-updates"
-                                data-attr="cloud-agents-profile-name"
-                            />
+                        <LemonField name="name" label="Name" help="API calls use this name to pick the preset.">
+                            <LemonInput placeholder="nightly-dependency-updates" data-attr="cloud-agents-preset-name" />
                         </LemonField>
                         <LemonField name="description" label="Description" showOptional>
-                            <LemonInput placeholder="What this profile is for" />
+                            <LemonInput placeholder="What this preset is for" />
                         </LemonField>
-                        <div className="grid grid-cols-1 gap-3 @min-[40rem]/main-content:grid-cols-2">
-                            <LemonField name="repository" label="Repository" showOptional>
-                                <LemonInput placeholder="owner/name" data-attr="cloud-agents-profile-repository" />
-                            </LemonField>
-                            <LemonField name="branch" label="Branch" showOptional>
-                                <LemonInput placeholder="The default branch" />
-                            </LemonField>
-                        </div>
+                        <RepositoryFields dataAttrPrefix="cloud-agents-preset" />
                         <LemonField name="size" label="Box size">
                             {({ value, onChange }) => (
                                 <div className="flex flex-col gap-1">
@@ -117,7 +109,7 @@ export function CloudAgentProfileScene({ id }: CloudAgentProfileLogicProps): JSX
                                         value={value}
                                         onChange={onChange}
                                         emptyLabel="Team default"
-                                        data-attr="cloud-agents-profile-size"
+                                        data-attr="cloud-agents-preset-size"
                                     />
                                     <BoxCostLine
                                         sizeName={value}
@@ -145,16 +137,17 @@ export function CloudAgentProfileScene({ id }: CloudAgentProfileLogicProps): JSX
                         >
                             <LemonTextArea minRows={4} placeholder="Run pnpm test before you open the pull request." />
                         </LemonField>
+                        <RunOptionFields emptyLabel="Team default" dataAttrPrefix="cloud-agents-preset" />
                         <LemonField
                             name="tags"
                             label="Tags"
                             showOptional
-                            help="Each run from this profile gets these tags."
+                            help="Each run from this preset gets these tags."
                         >
                             <LemonInputSelect mode="multiple" allowCustomValues placeholder="Add a tag" />
                         </LemonField>
                     </Form>
-                    <ProfileApiSnippet profileName={profileForm.name} />
+                    <PresetApiSnippet presetName={presetForm.name} />
                 </div>
             )}
         </SceneContent>

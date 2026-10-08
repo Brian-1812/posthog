@@ -10,53 +10,73 @@ import { projectLogic } from 'scenes/projectLogic'
 
 import { cloudAgentsSettingsPartialUpdate, cloudAgentsSettingsRetrieve } from '../generated/api'
 import type {
+    CloudAgentReasoningEffortEnumApi,
     CloudAgentSettingsApi,
     InferenceModeEnumApi,
     PatchedCloudAgentSettingsUpdateApi,
     SizeNameEnumApi,
 } from '../generated/api.schemas'
+import {
+    outputSchemaToText,
+    parseOutputSchema,
+    repositoryFields,
+    toRepositories,
+    validateIdleMinutes,
+    validateOutputSchema,
+    validateRepository,
+} from '../utils/runOptions'
 
 export interface TeamDefaultsForm {
     repository: string
     branch: string
     model: string | null
+    reasoning_effort: CloudAgentReasoningEffortEnumApi | null
     size: SizeNameEnumApi | null
     inference: InferenceModeEnumApi | null
     instructions: string
-    default_profile: string | null
+    idle_minutes: number | null
+    output_schema: string
+    default_preset: string | null
 }
 
 const EMPTY_TEAM_DEFAULTS: TeamDefaultsForm = {
     repository: '',
     branch: '',
     model: null,
+    reasoning_effort: null,
     size: null,
     inference: null,
     instructions: '',
-    default_profile: null,
+    idle_minutes: null,
+    output_schema: '',
+    default_preset: null,
 }
 
 function toForm(settings: CloudAgentSettingsApi): TeamDefaultsForm {
     return {
-        repository: settings.repository ?? '',
-        branch: settings.branch ?? '',
+        ...repositoryFields(settings.repositories),
         model: settings.model ?? null,
+        reasoning_effort: settings.reasoning_effort ?? null,
         size: settings.size ?? null,
         inference: settings.inference ?? null,
         instructions: settings.instructions ?? '',
-        default_profile: settings.default_profile,
+        idle_minutes: settings.idle_minutes ?? null,
+        output_schema: outputSchemaToText(settings.output_schema),
+        default_preset: settings.default_preset,
     }
 }
 
 function toPatch(form: TeamDefaultsForm): PatchedCloudAgentSettingsUpdateApi {
     return {
-        repository: form.repository.trim() || null,
-        branch: form.branch.trim() || null,
+        repositories: toRepositories(form.repository, form.branch),
         model: form.model,
+        reasoning_effort: form.reasoning_effort,
         size: form.size,
         inference: form.inference,
         instructions: form.instructions.trim() || null,
-        default_profile: form.default_profile,
+        idle_minutes: form.idle_minutes,
+        output_schema: parseOutputSchema(form.output_schema).schema,
+        default_preset: form.default_preset,
     }
 }
 
@@ -157,6 +177,11 @@ export const cloudAgentsSettingsLogic = kea<cloudAgentsSettingsLogicType>([
     forms(({ actions, values }) => ({
         teamDefaults: {
             defaults: EMPTY_TEAM_DEFAULTS,
+            errors: ({ repository, idle_minutes, output_schema }) => ({
+                repository: validateRepository(repository),
+                idle_minutes: validateIdleMinutes(idle_minutes),
+                output_schema: validateOutputSchema(output_schema),
+            }),
             submit: async (form) => {
                 try {
                     const settings = await cloudAgentsSettingsPartialUpdate(

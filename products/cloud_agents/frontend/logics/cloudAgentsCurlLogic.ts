@@ -7,7 +7,7 @@ import { projectLogic } from 'scenes/projectLogic'
 import { getCloudAgentsRunsCreateUrl } from '../generated/api'
 import type { CloudAgentRunCreateApi } from '../generated/api.schemas'
 
-export type CurlSurface = 'empty_state' | 'profile'
+export type CurlSurface = 'empty_state' | 'preset'
 
 /** The request that starts a run, as a curl command for the current project. */
 export function buildRunCurl(runsUrl: string, body: CloudAgentRunCreateApi): string {

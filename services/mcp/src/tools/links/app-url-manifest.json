@@ -364,13 +364,13 @@
         "params": [],
         "scope": "global"
     },
-    "cloudAgentProfile": {
-        "template": "/cloud-agents/profiles/{id}",
+    "cloudAgentPreset": {
+        "template": "/cloud-agents/presets/{id}",
         "params": ["id"],
         "scope": "project"
     },
-    "cloudAgentProfiles": {
-        "template": "/cloud-agents/profiles",
+    "cloudAgentPresets": {
+        "template": "/cloud-agents/presets",
         "params": [],
         "scope": "project"
     },

@@ -14,7 +14,7 @@ export function UsageTable(): JSX.Element {
 
     const columns: LemonTableColumns<CloudAgentUsageBucketApi> = [
         {
-            title: byDay ? 'Day' : 'Profile',
+            title: byDay ? 'Day' : 'Preset',
             key: 'bucket',
             render: (_, bucket) =>
                 byDay ? (
@@ -22,7 +22,7 @@ export function UsageTable(): JSX.Element {
                         {bucket.key ? dayjs.utc(bucket.key).format('MMM D, YYYY') : 'Unknown'}
                     </span>
                 ) : (
-                    (bucket.name ?? <span className="text-secondary">No profile</span>)
+                    (bucket.name ?? <span className="text-secondary">No preset</span>)
                 ),
         },
         {

@@ -1,9 +1,18 @@
-import { LemonTag } from '@posthog/lemon-ui'
+import { LemonTag, Tooltip } from '@posthog/lemon-ui'
 
-import type { CloudAgentRunStatusEnumApi } from '../generated/api.schemas'
-import { RUN_STATUS_DISPLAY } from '../utils/runStatus'
+import type { CloudAgentRunStatusEnumApi, CloudAgentRunStatusReasonEnumApi } from '../generated/api.schemas'
+import { getRunStatusDisplay } from '../utils/runStatus'
 
-export function RunStatusTag({ status }: { status: CloudAgentRunStatusEnumApi }): JSX.Element {
-    const display = RUN_STATUS_DISPLAY[status] ?? { label: status, type: 'default' as const }
-    return <LemonTag type={display.type}>{display.label}</LemonTag>
+export function RunStatusTag({
+    status,
+    reason,
+    detail,
+}: {
+    status: CloudAgentRunStatusEnumApi
+    reason: CloudAgentRunStatusReasonEnumApi | null
+    detail?: string | null
+}): JSX.Element {
+    const { label, type, tooltip } = getRunStatusDisplay(status, reason, detail)
+    const tag = <LemonTag type={type}>{label}</LemonTag>
+    return tooltip ? <Tooltip title={tooltip}>{tag}</Tooltip> : tag
 }

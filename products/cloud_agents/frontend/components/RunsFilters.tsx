@@ -3,14 +3,14 @@ import { useActions, useValues } from 'kea'
 import { LemonInput, LemonSelect } from '@posthog/lemon-ui'
 
 import { CloudAgentRunStatusEnumApi } from '../generated/api.schemas'
-import { cloudAgentProfilesLogic } from '../logics/cloudAgentProfilesLogic'
+import { cloudAgentPresetsLogic } from '../logics/cloudAgentPresetsLogic'
 import { cloudAgentsRunsLogic } from '../logics/cloudAgentsRunsLogic'
 import { RUN_STATUS_DISPLAY } from '../utils/runStatus'
 
 export function RunsFilters(): JSX.Element {
     const { filters } = useValues(cloudAgentsRunsLogic)
     const { setFilters } = useActions(cloudAgentsRunsLogic)
-    const { profiles, profilesLoading } = useValues(cloudAgentProfilesLogic)
+    const { presets, presetsLoading } = useValues(cloudAgentPresetsLogic)
 
     return (
         <div className="flex flex-wrap items-center gap-2">
@@ -37,14 +37,14 @@ export function RunsFilters(): JSX.Element {
             />
             <LemonSelect
                 size="small"
-                value={filters.profileId}
-                onChange={(profileId) => setFilters({ profileId })}
-                loading={profilesLoading}
+                value={filters.presetId}
+                onChange={(presetId) => setFilters({ presetId })}
+                loading={presetsLoading}
                 options={[
-                    { value: null, label: 'Any profile' },
-                    ...(profiles ?? []).map((profile) => ({ value: profile.id, label: profile.name })),
+                    { value: null, label: 'Any preset' },
+                    ...(presets ?? []).map((preset) => ({ value: preset.id, label: preset.name })),
                 ]}
-                data-attr="cloud-agents-runs-profile-filter"
+                data-attr="cloud-agents-runs-preset-filter"
             />
         </div>
     )
