@@ -33,8 +33,6 @@ class _FakeResponse:
         return self.status_code < 400
 
     def json(self) -> Any:
-        if isinstance(self._json_data, Exception):
-            raise self._json_data
         return self._json_data
 
     def raise_for_status(self) -> None:
