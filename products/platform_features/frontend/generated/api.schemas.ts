@@ -1457,6 +1457,7 @@ export type ActivityLogListParams = {
      * * `Billing` - Billing
      * * `Loop` - Loop
      * * `StamphogRepoConfig` - StamphogRepoConfig
+     * * `ReviewRepository` - ReviewRepository
      * @minLength 1
      */
     scope?: ActivityLogListScope
@@ -1562,6 +1563,7 @@ export const ActivityLogListScope = {
     Billing: 'Billing',
     Loop: 'Loop',
     StamphogRepoConfig: 'StamphogRepoConfig',
+    ReviewRepository: 'ReviewRepository',
 } as const
 
 /**
@@ -1654,6 +1656,7 @@ export const ActivityLogListScope = {
  * * `Billing` - Billing
  * * `Loop` - Loop
  * * `StamphogRepoConfig` - StamphogRepoConfig
+ * * `ReviewRepository` - ReviewRepository
  */
 export type ActivityLogListScopesItem = (typeof ActivityLogListScopesItem)[keyof typeof ActivityLogListScopesItem]
 
@@ -1747,6 +1750,7 @@ export const ActivityLogListScopesItem = {
     Billing: 'Billing',
     Loop: 'Loop',
     StamphogRepoConfig: 'StamphogRepoConfig',
+    ReviewRepository: 'ReviewRepository',
 } as const
 
 export type AdvancedActivityLogsListParams = {
