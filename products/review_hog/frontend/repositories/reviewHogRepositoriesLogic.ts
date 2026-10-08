@@ -297,10 +297,13 @@ export const reviewHogRepositoriesLogic = kea<reviewHogRepositoriesLogicType>([
         ],
         githubIntegration: [
             (s) => [s.githubIntegrations, s.selectedIntegrationId],
-            (githubIntegrations: IntegrationType[], selectedIntegrationId: number | null): IntegrationType | null =>
-                githubIntegrations.find((integration) => integration.id === selectedIntegrationId) ??
-                githubIntegrations[0] ??
-                null,
+            (githubIntegrations: IntegrationType[], selectedIntegrationId: number | null): IntegrationType | null => {
+                // An uninstalled or suspended installation cannot list repositories, so it never counts.
+                const usable = githubIntegrations.filter(
+                    (integration) => integration.installation_status !== 'unavailable'
+                )
+                return usable.find((integration) => integration.id === selectedIntegrationId) ?? usable[0] ?? null
+            },
         ],
     }),
 

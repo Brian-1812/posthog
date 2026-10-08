@@ -18,14 +18,17 @@ function RepositoryPicker({ integrationId }: { integrationId: number }): JSX.Ele
     const { setSearchQuery } = useActions(searchLogic)
 
     const options = addableRepositoryNames(repositoryNames, repositories).map((name) => ({ key: name, label: name }))
+    const usableIntegrations = githubIntegrations.filter(
+        (integration) => integration.installation_status !== 'unavailable'
+    )
 
     return (
         <div className="flex flex-wrap items-center gap-2">
-            {githubIntegrations.length > 1 && (
+            {usableIntegrations.length > 1 && (
                 <LemonSelect
                     aria-label="GitHub account"
                     value={integrationId}
-                    options={githubIntegrations.map((integration) => ({
+                    options={usableIntegrations.map((integration) => ({
                         value: integration.id,
                         label: integration.display_name,
                     }))}
