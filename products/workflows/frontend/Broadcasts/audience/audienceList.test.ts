@@ -1,4 +1,4 @@
-import { csvListError } from './audienceList'
+import { csvListError, peopleImportMessage } from './audienceList'
 
 describe('audienceList', () => {
     it.each([
@@ -19,5 +19,31 @@ describe('audienceList', () => {
         { case: 'one column of ids without a header', text: 'user-1\nuser-2\n', expected: null },
     ])('checks $case before uploading', ({ text, expected }) => {
         expect(csvListError(text)).toEqual(expected)
+    })
+
+    it.each([
+        {
+            case: 'nothing skipped',
+            dropped: [0, 0, 0],
+            expected:
+                'Added "List" to the audience. 2 new people were created. Their properties can take a minute to update.',
+        },
+        {
+            case: 'skipped rows',
+            dropped: [1, 2, 0],
+            expected:
+                'Added "List" to the audience. 2 new people were created. Skipped 3 rows: 1 had no valid email, 2 repeated an email or distinct ID. Their properties can take a minute to update.',
+        },
+    ])('reports an import with $case', ({ dropped: [invalid, duplicate, tooLarge], expected }) => {
+        const summary = {
+            cohort_id: 42,
+            row_count: 2,
+            new_people: 2,
+            columns: ['email'],
+            dropped_invalid_email: invalid,
+            dropped_duplicate_email: duplicate,
+            dropped_too_large: tooLarge,
+        }
+        expect(peopleImportMessage('List', summary)).toEqual(expected)
     })
 })
