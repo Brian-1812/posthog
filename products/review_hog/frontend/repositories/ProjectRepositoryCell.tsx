@@ -4,7 +4,7 @@ import { IconPlus, IconTrash } from '@posthog/icons'
 import { LemonButton, LemonCheckbox, LemonDialog, LemonSelect, LemonSnack } from '@posthog/lemon-ui'
 
 import { MemberSelect } from 'lib/components/MemberSelect'
-import { fullName } from 'lib/utils/strings'
+import { fullNameOrEmail } from 'lib/utils/strings'
 import { userLogic } from 'scenes/userLogic'
 
 import type { ReviewRepositoryApi } from 'products/review_hog/frontend/generated/api.schemas'
@@ -82,7 +82,7 @@ export function ProjectRepositoryCell({
                         onClose={savingReason ? undefined : () => removePerson(repository, person)}
                         data-attr="review-hog-repository-person"
                     >
-                        {fullName(person.user)}
+                        {fullNameOrEmail(person.user)}
                         {person.user.id === user?.id ? ' (you)' : ''}
                     </LemonSnack>
                 ))}
