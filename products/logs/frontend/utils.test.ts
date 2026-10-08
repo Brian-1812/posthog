@@ -1,6 +1,9 @@
+import { PropertyFilterType } from '~/types'
+
 import {
     buildLogsSessionScope,
     formatFilterGroupValues,
+    getAttributeFilterType,
     getDistinctIdWithKey,
     getFiltersSummaryLines,
     getSessionIdFromLogAttributes,
@@ -51,6 +54,19 @@ describe('logs utils', () => {
         it('keeps matching the built-in conventions alongside configured keys', () => {
             expect(isDistinctIdKey('posthogDistinctId', ['user.id'])).toBe(true)
             expect(isDistinctIdKey('unrelated', ['user.id'])).toBe(false)
+        })
+    })
+
+    describe('getAttributeFilterType', () => {
+        it.each([
+            ['attribute only', { 'k8s.pod': 'a' }, undefined, PropertyFilterType.LogAttribute],
+            ['resource attribute only', {}, { 'k8s.pod': 'r' }, PropertyFilterType.LogResourceAttribute],
+            ['both maps', { 'k8s.pod': 'a' }, { 'k8s.pod': 'r' }, PropertyFilterType.LogAttribute],
+            ['empty attribute value', { 'k8s.pod': '' }, { 'k8s.pod': 'r' }, PropertyFilterType.LogAttribute],
+            ['neither map', {}, {}, PropertyFilterType.LogAttribute],
+            ['prototype key', {}, {}, PropertyFilterType.LogAttribute, 'constructor'],
+        ])('%s', (_, attributes, resourceAttributes, expected, key = 'k8s.pod') => {
+            expect(getAttributeFilterType(key, attributes, resourceAttributes)).toEqual(expected)
         })
     })
 

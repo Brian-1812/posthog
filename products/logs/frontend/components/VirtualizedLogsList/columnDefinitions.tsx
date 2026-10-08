@@ -45,7 +45,7 @@ import {
     logsConfigLogic,
 } from 'products/logs/frontend/logsConfigLogic'
 import { LogsOrderBy, ParsedLogMessage } from 'products/logs/frontend/types'
-import { getDistinctIdWithKey, getSessionIdWithKey } from 'products/logs/frontend/utils'
+import { getAttributeFilterType, getDistinctIdWithKey, getSessionIdWithKey } from 'products/logs/frontend/utils'
 
 export const SEVERITY_BAR_COLORS: Record<LogMessage['severity_text'], string> = {
     trace: 'bg-muted-alt',
@@ -402,6 +402,11 @@ export function createConfiguredColumn(params: {
                     <AttributeCell
                         attributeKey={semanticKey}
                         value={getBuiltInValue ? getBuiltInValue(log) : customColumnValue(log, alias)}
+                        filterType={
+                            config.type === 'custom'
+                                ? getAttributeFilterType(semanticKey, log.attributes, log.resource_attributes)
+                                : undefined
+                        }
                         width={totalWidth}
                         timestamp={log.timestamp}
                     />

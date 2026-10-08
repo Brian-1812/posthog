@@ -3,7 +3,7 @@ import { isValidPropertyFilter } from 'lib/components/PropertyFilters/utils'
 import { dayjs } from 'lib/dayjs'
 import { capitalizeFirstLetter } from 'lib/utils/strings'
 
-import { AnyPropertyFilter, PropertyOperator } from '~/types'
+import { AnyPropertyFilter, PropertyFilterType, PropertyOperator } from '~/types'
 
 import { LogsViewerFilters } from 'products/logs/frontend/components/LogsViewer/config/types'
 import {
@@ -234,6 +234,23 @@ export function getDistinctIdWithKey(
     configuredKeys?: string[]
 ): LogIdentityMatch | null {
     return getIdentityMatch(attributes, resourceAttributes, configuredKeys, (key) => isDistinctIdKey(key))
+}
+
+/**
+ * The filter type for a value read from `attributes[key]` with a fallback to
+ * `resource_attributes[key]`. It follows the same lookup order as `attributeLookupExpression`.
+ */
+export function getAttributeFilterType(
+    key: string,
+    attributes: Record<string, unknown> | undefined,
+    resourceAttributes: Record<string, unknown> | undefined
+): PropertyFilterType.LogAttribute | PropertyFilterType.LogResourceAttribute {
+    if (attributes && Object.hasOwn(attributes, key)) {
+        return PropertyFilterType.LogAttribute
+    }
+    return resourceAttributes && Object.hasOwn(resourceAttributes, key)
+        ? PropertyFilterType.LogResourceAttribute
+        : PropertyFilterType.LogAttribute
 }
 
 export function getSessionIdFromLogAttributes(
