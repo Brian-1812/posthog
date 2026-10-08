@@ -55,7 +55,7 @@ from products.tasks.backend.facade.contracts import (
     TaskUserBasicInfo,
     WizardCloudRunDTO,
 )
-from products.tasks.backend.facade.enums import CHANNEL_WRITE_TYPE_CHOICES
+from products.tasks.backend.facade.enums import TaskChannelWriteType
 from products.tasks.backend.facade.inference import RunInferenceCredential
 from products.tasks.backend.facade.model_catalogue import TASK_RUN_GATEWAY_PRODUCT, ModelChoice, available_model_choices
 from products.tasks.backend.facade.run_config import (
@@ -231,16 +231,20 @@ TASK_RUN_PDF_ARTIFACT_MAX_SIZE_BYTES = 10 * 1024 * 1024
 # thirds, so only three quarters of that ceiling is reachable, less room for the surrounding
 # JSON. Larger artifacts go through prepare_upload, which presigns straight to object storage.
 TASK_RUN_ARTIFACT_INLINE_MAX_SIZE_BYTES = (settings.DATA_UPLOAD_MAX_MEMORY_SIZE * 3) // 4 - 1024 * 1024
-TASK_RUN_ARTIFACT_TYPE_CHOICES = [
-    "plan",
-    "context",
-    "reference",
-    "output",
-    "artifact",
-    "tree_snapshot",
-    "user_attachment",
-    "skill_bundle",
-]
+
+
+# The labels repeat the values because the published OpenAPI enum lists these exact pairs.
+class TaskRunArtifactType(models.TextChoices):
+    PLAN = "plan", "plan"
+    CONTEXT = "context", "context"
+    REFERENCE = "reference", "reference"
+    OUTPUT = "output", "output"
+    ARTIFACT = "artifact", "artifact"
+    TREE_SNAPSHOT = "tree_snapshot", "tree_snapshot"
+    USER_ATTACHMENT = "user_attachment", "user_attachment"
+    SKILL_BUNDLE = "skill_bundle", "skill_bundle"
+
+
 TASK_RUN_ARTIFACT_CONTENT_ENCODING_CHOICES = ["utf-8", "base64"]
 TASK_RUN_SKILL_BUNDLE_FORMAT_CHOICES = ["zip"]
 TASK_RUN_SKILL_SOURCE_CHOICES = ["user", "repo", "marketplace", "codex"]
@@ -500,7 +504,7 @@ class TaskRunDetailSerializer(DataclassSerializer):
     )
     artifacts = TaskRunArtifactResponseSerializer(many=True, read_only=True)
     runtime_adapter = serializers.ChoiceField(
-        choices=[adapter.value for adapter in RuntimeAdapter],
+        choices=RuntimeAdapter.choices,
         allow_null=True,
         required=False,
         help_text="Configured runtime adapter for this run, such as 'claude' or 'codex'.",
@@ -835,7 +839,7 @@ class TaskWriteSerializer(serializers.Serializer):
     # null and "" are not interchangeable: model keeps allow_blank=False so an
     # empty string, which is never a valid model id, is still rejected.
     runtime_adapter = serializers.ChoiceField(
-        choices=[adapter.value for adapter in RuntimeAdapter],
+        choices=RuntimeAdapter.choices,
         required=False,
         default=None,
         allow_null=True,
@@ -1410,7 +1414,7 @@ class TaskRunRelayMessageRequestSerializer(serializers.Serializer):
 
 class TaskRunArtifactUploadSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, help_text="File name to associate with the artifact")
-    type = serializers.ChoiceField(choices=TASK_RUN_ARTIFACT_TYPE_CHOICES, help_text="Classification for the artifact")
+    type = serializers.ChoiceField(choices=TaskRunArtifactType.choices, help_text="Classification for the artifact")
     source = serializers.CharField(  # type: ignore[assignment]
         max_length=64,
         required=False,
@@ -1735,7 +1739,7 @@ class TaskRunLivingArtifactEditRequestSerializer(serializers.Serializer):
 
 class TaskRunArtifactPrepareUploadSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, help_text="File name to associate with the artifact")
-    type = serializers.ChoiceField(choices=TASK_RUN_ARTIFACT_TYPE_CHOICES, help_text="Classification for the artifact")
+    type = serializers.ChoiceField(choices=TaskRunArtifactType.choices, help_text="Classification for the artifact")
     source = serializers.CharField(  # type: ignore[assignment]
         max_length=64,
         required=False,
@@ -1819,7 +1823,7 @@ class TaskRunArtifactsPrepareUploadResponseSerializer(serializers.Serializer):
 class TaskRunArtifactFinalizeUploadSerializer(serializers.Serializer):
     id = serializers.CharField(help_text="Stable identifier returned by the prepare upload endpoint")
     name = serializers.CharField(max_length=255, help_text="File name associated with the artifact")
-    type = serializers.ChoiceField(choices=TASK_RUN_ARTIFACT_TYPE_CHOICES, help_text="Classification for the artifact")
+    type = serializers.ChoiceField(choices=TaskRunArtifactType.choices, help_text="Classification for the artifact")
     source = serializers.CharField(  # type: ignore[assignment]
         max_length=64,
         required=False,
@@ -1858,7 +1862,7 @@ class TaskRunArtifactsFinalizeUploadResponseSerializer(serializers.Serializer):
 
 class TaskStagedArtifactPrepareUploadSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, help_text="File name to associate with the staged artifact")
-    type = serializers.ChoiceField(choices=TASK_RUN_ARTIFACT_TYPE_CHOICES, help_text="Classification for the artifact")
+    type = serializers.ChoiceField(choices=TaskRunArtifactType.choices, help_text="Classification for the artifact")
     source = serializers.CharField(  # type: ignore[assignment]
         max_length=64,
         required=False,
@@ -1942,7 +1946,7 @@ class TaskStagedArtifactsPrepareUploadResponseSerializer(serializers.Serializer)
 class TaskStagedArtifactFinalizeUploadSerializer(serializers.Serializer):
     id = serializers.CharField(help_text="Stable identifier returned by the staged prepare upload endpoint")
     name = serializers.CharField(max_length=255, help_text="File name associated with the staged artifact")
-    type = serializers.ChoiceField(choices=TASK_RUN_ARTIFACT_TYPE_CHOICES, help_text="Classification for the artifact")
+    type = serializers.ChoiceField(choices=TaskRunArtifactType.choices, help_text="Classification for the artifact")
     source = serializers.CharField(  # type: ignore[assignment]
         max_length=64,
         required=False,
@@ -2588,7 +2592,7 @@ class ChannelWriteSerializer(serializers.Serializer):
         max_length=128, help_text="Channel name, shown as #<name>. Uses lowercase letters and hyphens."
     )
     channel_type = serializers.ChoiceField(
-        choices=CHANNEL_WRITE_TYPE_CHOICES,
+        choices=TaskChannelWriteType.choices,
         default="public",
         help_text=(
             "Use 'public' for access by all project members. Use 'private' for access by channel members only. "
@@ -2656,7 +2660,7 @@ class ChannelUpdateSerializer(serializers.Serializer):
         help_text="Days of inactivity before tasks in this channel are archived. Accepts 1 through 365. Null disables automatic archiving.",
     )
     channel_type = serializers.ChoiceField(
-        choices=CHANNEL_WRITE_TYPE_CHOICES,
+        choices=TaskChannelWriteType.choices,
         required=False,
         help_text=(
             "Switch a shared space between 'public' and 'private'. Making a space private keeps only the creator "
@@ -3287,7 +3291,7 @@ class ModelChoiceSerializer(DataclassSerializer):
     """
 
     runtime_adapter = serializers.ChoiceField(
-        choices=[adapter.value for adapter in RuntimeAdapter],
+        choices=RuntimeAdapter.choices,
         help_text="Runtime that drives this model, such as 'claude' or 'codex'.",
     )
     display_name = serializers.CharField(
@@ -3589,8 +3593,6 @@ class TaskRunCreateRequestSerializer(
     """Request body for creating a new task run"""
 
     PR_AUTHORSHIP_MODE_CHOICES = [mode.value for mode in PrAuthorshipMode]
-    RUN_SOURCE_CHOICES = [source.value for source in RunSource]
-    RUNTIME_ADAPTER_CHOICES = [adapter.value for adapter in RuntimeAdapter]
     REASONING_EFFORT_CHOICES = list(REASONING_EFFORTS)
 
     mode = serializers.ChoiceField(
@@ -3650,7 +3652,7 @@ class TaskRunCreateRequestSerializer(
         ),
     )
     run_source = serializers.ChoiceField(
-        choices=RUN_SOURCE_CHOICES,
+        choices=RunSource.choices,
         required=False,
         default=None,
         help_text="High-level source that triggered this run, used to distinguish manual and signal-based cloud runs.",
@@ -3662,7 +3664,7 @@ class TaskRunCreateRequestSerializer(
         help_text="Optional signal report identifier when this run was started from Inbox.",
     )
     runtime_adapter = serializers.ChoiceField(
-        choices=RUNTIME_ADAPTER_CHOICES,
+        choices=RuntimeAdapter.choices,
         required=False,
         default=None,
         help_text="Agent runtime adapter to launch for this run. Use 'claude' for the Claude runtime or 'codex' for the Codex runtime.",
@@ -3806,7 +3808,6 @@ class TaskRunBootstrapCreateRequestSerializer(
 
     PR_AUTHORSHIP_MODE_CHOICES = [mode.value for mode in PrAuthorshipMode]
     RUN_SOURCE_CHOICES = [source.value for source in RunSource if source != RunSource.AGENT]
-    RUNTIME_ADAPTER_CHOICES = [adapter.value for adapter in RuntimeAdapter]
     REASONING_EFFORT_CHOICES = TASK_RUN_REASONING_EFFORT_CHOICES
 
     environment = serializers.ChoiceField(
@@ -3867,7 +3868,7 @@ class TaskRunBootstrapCreateRequestSerializer(
         help_text="Optional signal report identifier when this run was started from Inbox.",
     )
     runtime_adapter = serializers.ChoiceField(
-        choices=RUNTIME_ADAPTER_CHOICES,
+        choices=RuntimeAdapter.choices,
         required=False,
         default=None,
         help_text="Agent runtime adapter to launch for this run. Use 'claude' for the Claude runtime or 'codex' for the Codex runtime.",
@@ -4025,7 +4026,7 @@ class WarmTaskRequestSerializer(serializers.Serializer):
         help_text="Branch to check out in the warm sandbox. Defaults to the repository's default branch when omitted.",
     )
     runtime_adapter = serializers.ChoiceField(
-        choices=[adapter.value for adapter in RuntimeAdapter],
+        choices=RuntimeAdapter.choices,
         required=False,
         default=None,
         allow_null=True,
@@ -4164,7 +4165,7 @@ class WarmTaskResumeRequestSerializer(serializers.Serializer):
         help_text="ID of the task's latest terminal run whose snapshot and conversation should be resumed.",
     )
     runtime_adapter = serializers.ChoiceField(
-        choices=[adapter.value for adapter in RuntimeAdapter],
+        choices=RuntimeAdapter.choices,
         required=False,
         default=None,
         help_text="Agent runtime adapter to start before the next message is submitted.",
@@ -4372,7 +4373,7 @@ class TaskRunResumeRequestSchemaSerializer(TaskRunScheduleSerializer):
         help_text="Whether pull requests for this run should be authored by the user or the bot.",
     )
     run_source = serializers.ChoiceField(
-        choices=TaskRunCreateRequestSerializer.RUN_SOURCE_CHOICES,
+        choices=RunSource.choices,
         required=False,
         default=None,
         help_text="High-level source that triggered this run, used to distinguish manual and signal-based cloud runs.",
@@ -5109,7 +5110,6 @@ class TasksAIRunPreferencesSerializer(serializers.Serializer):
     every field as null to clear a stored preference.
     """
 
-    RUNTIME_ADAPTER_CHOICES = [adapter.value for adapter in RuntimeAdapter]
     REASONING_EFFORT_CHOICES = TASK_RUN_REASONING_EFFORT_CHOICES
 
     runtime = serializers.ChoiceField(
@@ -5123,7 +5123,7 @@ class TasksAIRunPreferencesSerializer(serializers.Serializer):
         ),
     )
     runtime_adapter = serializers.ChoiceField(
-        choices=RUNTIME_ADAPTER_CHOICES,
+        choices=RuntimeAdapter.choices,
         required=False,
         allow_null=True,
         default=None,

@@ -5282,6 +5282,7 @@ export namespace Schemas {
       Metric: 'Metric',
       ActionsPie: 'ActionsPie',
       ActionsDonut: 'ActionsDonut',
+      ActionsProportionBar: 'ActionsProportionBar',
       ActionsBarValue: 'ActionsBarValue',
       ActionsTable: 'ActionsTable',
       WorldMap: 'WorldMap',
@@ -10607,7 +10608,7 @@ export namespace Schemas {
       goalLines?: GoalLine[] | null;
       heatmap?: HeatmapSettings | null;
       leftYAxisSettings?: YAxisSettings | null;
-      /** Where the legend sits relative to the chart. Unset falls back per chart type: right for pie, top for the rest. */
+      /** Where the legend sits relative to the chart. Unset falls back per chart type: right for pie and donut, bottom for proportion bar, top for the rest. */
       legendPosition?: LegendPosition | null;
       metric?: MetricChartSettings | null;
       pie?: PieChartSettings | null;
@@ -10689,6 +10690,25 @@ export namespace Schemas {
       Year: 'year',
     } as const;
 
+    export interface BICategoryGroup {
+      name: string;
+      values: string[];
+    }
+
+    export interface BILocalFieldDefinition1 {
+      expression: string;
+      groups: BICategoryGroup[];
+      kind?: 'groups';
+      other: string;
+    }
+
+    export interface BILocalFieldDefinition2 {
+      expression: string;
+      kind?: 'bins';
+      origin: number;
+      width: number;
+    }
+
     export interface BIDataSource {
       connectionId?: string | null;
       table: string;
@@ -10720,10 +10740,18 @@ export namespace Schemas {
       dateBucket?: BIDateBucket | null;
       expression: string;
       id: string;
+      localDefinition?: BILocalFieldDefinition1 | BILocalFieldDefinition2 | null;
       name: string;
       source: BIDataSource;
       type: DatabaseSerializedFieldType;
     }
+
+    export type ComparisonPeriod = typeof ComparisonPeriod[keyof typeof ComparisonPeriod];
+
+
+    export const ComparisonPeriod = {
+      Previous: 'previous',
+    } as const;
 
     export type BIFilterOperator = typeof BIFilterOperator[keyof typeof BIFilterOperator];
 
@@ -10887,11 +10915,15 @@ export namespace Schemas {
       chartType: ChartDisplayType;
       columns: BIField[];
       compareFilter?: CompareFilter | null;
+      /** Explore only the comparison window, using dateRange as its reference window. */
+      comparisonPeriod?: ComparisonPeriod | null;
       /** Column that receives the worksheet and dashboard date range. */
       dateField?: BIField | null;
       dateRange?: DateRange | null;
       filters: BIFilter[];
       limit: BIQueryLimit;
+      /** Reusable expressions owned by this worksheet only. */
+      localFields?: BIField[] | null;
       /** Fill missing date buckets before table calculations. Unset preserves observed points only. */
       missingDates?: MissingDates | null;
       resultFilterGroup?: BIConditionGroup | null;
@@ -30676,6 +30708,7 @@ export namespace Schemas {
       Robohog: 'robohog',
       Hogzilla: 'hogzilla',
       Ghost: 'ghost',
+      Pig: 'pig',
     } as const;
 
     export interface MinimalHedgehogConfig {
@@ -46428,7 +46461,6 @@ export namespace Schemas {
 
     /**
      * * `thumbnail` - Thumbnail
-     * * `clip` - Clip
      * * `chapter` - Chapter
      */
     export type ReplayObservationMediaKindEnum = typeof ReplayObservationMediaKindEnum[keyof typeof ReplayObservationMediaKindEnum];
@@ -46436,38 +46468,26 @@ export namespace Schemas {
 
     export const ReplayObservationMediaKindEnum = {
       Thumbnail: 'thumbnail',
-      Clip: 'clip',
       Chapter: 'chapter',
     } as const;
 
     /**
-     * One thumbnail or clip illustrating an observation.
+     * One frame illustrating an observation.
      */
     export interface ReplayObservationMedia {
       /** Id of this media entry. */
       readonly id: string;
-      /** `thumbnail` for the single frame that illustrates the observation, `chapter` for the frame of one summary chapter, `clip` for a short video.
+      /** `thumbnail` for the single frame that illustrates the observation, `chapter` for the frame of one summary chapter.
        *
        * * `thumbnail` - Thumbnail
-       * * `clip` - Clip
        * * `chapter` - Chapter */
       readonly kind: ReplayObservationMediaKindEnum;
       /** Order among media of the same kind. For a `chapter` frame, the index into `model_output.chapters`. */
       readonly position: number;
       /** Export asset holding the bytes; fetch it from the export content endpoint. */
       readonly asset_id: number;
-      /**
-         * One sentence saying what the clip shows. Null for thumbnails.
-         * @nullable
-         */
-      readonly description: string | null;
       /** Where this media starts in the analysis video, in milliseconds. */
       readonly video_start_ms: number;
-      /**
-         * Where a clip ends in the analysis video, in milliseconds. Null for thumbnails.
-         * @nullable
-         */
-      readonly video_end_ms: number | null;
     }
 
     export interface ReplayObservation {
@@ -46542,7 +46562,7 @@ export namespace Schemas {
       readonly label: ReplayObservationLabel | null;
       /** Whether the calling user has opened this observation. */
       readonly viewed: boolean;
-      /** Thumbnails and clips illustrating this observation, in order. Empty until the media render finishes. */
+      /** Frames illustrating this observation, in order. Empty until the media render finishes. */
       readonly media: readonly ReplayObservationMedia[];
       /** One line of plain text saying what the scanner found: its verdict, score, tags or title, then its own words, with markdown flattened and the text truncated. An observation that produced no result carries the reason instead, and one still in flight carries an empty string. Read this in place of `scanner_result` when you scan a list of observations. */
       readonly summary_line: string;
@@ -73149,6 +73169,8 @@ export namespace Schemas {
       reviewed_by?: UserBasicInfo | null;
       cluster_summary?: ClusterSummary | null;
       row_shift?: RowShift | null;
+      /** Whether a quarantine covered this snapshot when the run was last gated, so its diff did not block the pull request. It keeps that value after the quarantine ends or a new one starts. */
+      is_quarantined?: boolean;
       id: string;
       run_id: string;
       identifier: string;
@@ -73164,7 +73186,6 @@ export namespace Schemas {
       approved_hash: string;
       /** @nullable */
       tolerated_hash_id?: string | null;
-      is_quarantined?: boolean;
       metadata?: SnapshotMetadata;
       /** @nullable */
       ssim_score?: number | null;
@@ -73179,7 +73200,7 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: Snapshot[];
-      /** Count of this run's snapshots that match the other filters and whose identifier is currently quarantined. Excluded from results unless include_quarantined=true is passed. */
+      /** Count of this run's snapshots that match the other filters and whose identifier is quarantined now. Excluded from results unless include_quarantined=true is passed. This can differ from the run's own counts, which use the quarantines at gating time. */
       quarantined_count?: number;
     }
 
@@ -121106,7 +121127,7 @@ export namespace Schemas {
      */
     prompt_name?: string;
     /**
-     * Free-text search applied to the experiment name (case-insensitive).
+     * Free-text search applied to the experiment name and its feature flag key (case-insensitive).
      */
     search?: string;
     /**
@@ -121186,7 +121207,7 @@ export namespace Schemas {
      */
     prompt_name?: string;
     /**
-     * Free-text search applied to the experiment name (case-insensitive).
+     * Free-text search applied to the experiment name and its feature flag key (case-insensitive).
      */
     search?: string;
     /**
@@ -128430,14 +128451,24 @@ export namespace Schemas {
      */
     offset?: number;
     /**
-     * Filter by review state
+     * Filter by where the run stands in review. `needs_review`: a completed pull request run with changes nobody approved yet. `clean`: no changes, or approved. `processing`: diffs still computing. `stale`: superseded by a newer run while its changes were unapproved.
      */
-    review_state?: string;
+    review_state?: VisualReviewReposRunsListReviewState;
     /**
      * Free-text search over branch, commit SHA, run type, and PR number
      */
     search?: string;
     };
+
+    export type VisualReviewReposRunsListReviewState = typeof VisualReviewReposRunsListReviewState[keyof typeof VisualReviewReposRunsListReviewState];
+
+
+    export const VisualReviewReposRunsListReviewState = {
+      Clean: 'clean',
+      NeedsReview: 'needs_review',
+      Processing: 'processing',
+      Stale: 'stale',
+    } as const;
 
     export type VisualReviewReposSnapshotsListParams = {
     /**
@@ -128472,14 +128503,24 @@ export namespace Schemas {
      */
     pr_number?: number;
     /**
-     * Filter by review state
+     * Filter by where the run stands in review. `needs_review`: a completed pull request run with changes nobody approved yet. `clean`: no changes, or approved. `processing`: diffs still computing. `stale`: superseded by a newer run while its changes were unapproved.
      */
-    review_state?: string;
+    review_state?: VisualReviewRunsListReviewState;
     /**
      * Free-text search over branch, commit SHA, run type, and PR number
      */
     search?: string;
     };
+
+    export type VisualReviewRunsListReviewState = typeof VisualReviewRunsListReviewState[keyof typeof VisualReviewRunsListReviewState];
+
+
+    export const VisualReviewRunsListReviewState = {
+      Clean: 'clean',
+      NeedsReview: 'needs_review',
+      Processing: 'processing',
+      Stale: 'stale',
+    } as const;
 
     export type VisualReviewRunsSnapshotHistoryListParams = {
     /**
@@ -128502,7 +128543,7 @@ export namespace Schemas {
      */
     exclude_unchanged?: boolean;
     /**
-     * Whether to include snapshots whose identifier is currently quarantined. Defaults to false: quarantined snapshots are excluded from results and reported in quarantined_count instead, since they are noise when reviewing real changes.
+     * Whether to include snapshots whose identifier is currently quarantined. Defaults to false: quarantined snapshots are excluded from results and reported in quarantined_count instead, since they are noise when reviewing real changes. This filter uses the quarantines active now. Each snapshot's `is_quarantined` flag holds the state when the run was gated, so for an older run pass true and read the flag.
      */
     include_quarantined?: boolean;
     /**
@@ -128514,7 +128555,7 @@ export namespace Schemas {
      */
     offset?: number;
     /**
-     * Whether to list only the snapshots whose identifier is currently quarantined. Defaults to false. When true, `include_quarantined` is ignored and quarantined snapshots are returned. Combine with `exclude_unchanged=false` to find a quarantined story that rendered `unchanged`, which is the snapshot to request a lift on merge for.
+     * Whether to list only the snapshots whose identifier is currently quarantined. Defaults to false. When true, `include_quarantined` is ignored and quarantined snapshots are returned. Combine with `exclude_unchanged=false` to find a quarantined story that rendered `unchanged`, which is the snapshot to request a lift on merge for. This uses the quarantines active now, not each snapshot's `is_quarantined` flag, so on an older run it misses stories whose quarantine has ended since.
      */
     quarantined_only?: boolean;
     /**
