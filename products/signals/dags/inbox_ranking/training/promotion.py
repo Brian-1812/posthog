@@ -2,7 +2,7 @@
 
 A candidate replaces the champion when it is at least as good on every head the champion could
 read, has at least one readable head itself, and enough days have passed since the last promotion
-(scores are consumed by an online shadow read, and a champion that changes every day muddies it).
+(the online grade reads the served scores per version, and a champion that changes every day muddies it).
 Pure function over the two metadata records so the rule is testable without S3.
 
 `champion_grades` holds the champion's holdout booster graded on the candidate's holdout, so both
