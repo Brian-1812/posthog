@@ -435,7 +435,14 @@ export async function getInsightWithRetry(
                                     async () => {
                                         // nosemgrep: prefer-codegen-api -- Preserve the existing dynamic insight request and its filter overrides.
                                         const rerunResponse = await api.get(asyncApiUrl('async'), methodOptions)
-                                        if (rerunResponse?.query_status?.id && !rerunResponse.query_status.complete) {
+                                        if (rerunResponse?.result != null && !rerunResponse.query_status?.error) {
+                                            return getQueryBasedInsightModel(rerunResponse)
+                                        }
+                                        if (
+                                            rerunResponse?.result == null &&
+                                            rerunResponse?.query_status?.id &&
+                                            !rerunResponse.query_status.complete
+                                        ) {
                                             return await readCachedInsight(
                                                 await pollForResults(rerunResponse.query_status.id, methodOptions)
                                             )

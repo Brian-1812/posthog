@@ -325,6 +325,23 @@ describe('query', () => {
         })
 
         it.each([
+            { name: 'a failed rerun', results: undefined, error: true, recovered: false },
+            { name: 'an empty result', results: [], error: false, recovered: true },
+        ])('records recovery accurately for $name after expiry', async ({ results, error, recovered }) => {
+            const capture = jest.spyOn(posthog, 'capture').mockImplementation()
+            jest.spyOn(api, 'query').mockResolvedValueOnce(submitted('gone')).mockResolvedValueOnce(submitted('rerun'))
+            jest.spyOn(api.queryStatus, 'get')
+                .mockRejectedValueOnce(forgotten())
+                .mockResolvedValueOnce({ query_status: { id: 'rerun', complete: true, error, results } } as any)
+
+            await expect(performQuery(query, undefined, 'async')).resolves.toEqual(results)
+
+            expect(capture.mock.calls.filter(([event]) => event === 'query rerun after status expired')).toEqual([
+                ['query rerun after status expired', { source: 'query', recovered }, undefined],
+            ])
+        })
+
+        it.each([
             ['an error that is not a 404', new ApiError('boom', 500), undefined],
             ['an error with a caller-supplied ID', new ApiError('boom', 500), 'client-query-id'],
             [

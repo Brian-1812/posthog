@@ -69,9 +69,8 @@ export const QUERY_TIMEOUT_ERROR_MESSAGE = 'Query timed out'
 const MANAGED_WAREHOUSE_UNAVAILABLE_CODE = 'managed_warehouse_connection_unavailable'
 
 /**
- * The server keeps a query's status in Redis for 20 minutes. A 404 on a status poll after that
- * means the server forgot the query, which most likely finished and cached its result. A managed
- * warehouse that is down also answers 404, but a rerun cannot fix that one.
+ * A missing query status can be recovered by submitting again. An unavailable managed
+ * warehouse also answers 404, but resubmitting cannot fix that.
  */
 export function isExpiredQueryStatusError(e: any): boolean {
     return e?.status === 404 && e?.code !== MANAGED_WAREHOUSE_UNAVAILABLE_CODE
@@ -238,9 +237,7 @@ async function executeQuery<N extends DataNode>(
     try {
         statusResponse = await pollForResults(queryId, methodOptions, setPollResponse)
     } catch (e: any) {
-        // The server keeps a query's status in Redis for 20 minutes. A backgrounded tab stops
-        // polling and stops its own give-up timer, so it can outlive that TTL and then poll for a
-        // query the server has forgotten. That query most likely finished and cached its result.
+        // A backgrounded tab can outlive the query's status. Submit once more to recover its result.
         //
         // So run it again, once. force_async becomes async, to read the cached result instead of
         // recomputing it. The query ID is reused, so cancels and log lookups still find the run;
@@ -252,20 +249,23 @@ async function executeQuery<N extends DataNode>(
         if (retriedAfterExpiry || !isExpiredQueryStatusError(e) || isSharedView()) {
             throw e
         }
-        return await captureRerunAfterStatusExpired('query', () =>
-            executeQuery(
-                queryNode,
-                methodOptions,
-                refresh === 'force_async' ? 'async' : refresh,
-                queryId,
-                setPollResponse,
-                filtersOverride,
-                variablesOverride,
-                false,
-                limitContext,
-                acceptStaleCache,
-                true
-            )
+        return await captureRerunAfterStatusExpired(
+            'query',
+            () =>
+                executeQuery(
+                    queryNode,
+                    methodOptions,
+                    refresh === 'force_async' ? 'async' : refresh,
+                    queryId,
+                    setPollResponse,
+                    filtersOverride,
+                    variablesOverride,
+                    false,
+                    limitContext,
+                    acceptStaleCache,
+                    true
+                ),
+            (result) => result != null
         )
     }
     return statusResponse.results
@@ -275,7 +275,7 @@ async function executeQuery<N extends DataNode>(
 export async function captureRerunAfterStatusExpired<T>(
     source: 'query' | 'dashboard_tile',
     rerun: () => Promise<T>,
-    didRecover: (result: T) => boolean = () => true
+    didRecover: (result: T) => boolean
 ): Promise<T> {
     try {
         const result = await rerun()

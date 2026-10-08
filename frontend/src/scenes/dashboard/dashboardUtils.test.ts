@@ -507,9 +507,19 @@ describe('getInsightWithRetry', () => {
     )
 
     it.each([
-        { description: 'available', cachedResult: ['from the cache'] },
-        { description: 'missing', cachedResult: null },
-    ])('handles a cached result that is $description after status expiry', async ({ cachedResult }) => {
+        { description: 'available', cachedResult: ['from the cache'], queryStatus: null },
+        { description: 'missing', cachedResult: null, queryStatus: null },
+        {
+            description: 'available while refreshing',
+            cachedResult: ['from the cache'],
+            queryStatus: { id: 'refresh', complete: false, error: false },
+        },
+        {
+            description: 'empty while refreshing',
+            cachedResult: [],
+            queryStatus: { id: 'refresh', complete: false, error: false },
+        },
+    ])('handles a cached result that is $description after status expiry', async ({ cachedResult, queryStatus }) => {
         const capture = jest.spyOn(posthog, 'capture').mockImplementation()
         jest.spyOn(lemonToast, 'error').mockImplementation()
         const rateLimited = {
@@ -521,8 +531,11 @@ describe('getInsightWithRetry', () => {
         const getSpy = jest
             .spyOn(api, 'get')
             .mockResolvedValueOnce({ ...insight, result: null, query_status: { id: 'cache_1_abc', complete: false } })
-            .mockResolvedValueOnce({ ...insight, result: cachedResult, query_status: null })
-        jest.spyOn(api.queryStatus, 'get').mockRejectedValueOnce(new ApiError('Query not found', 404))
+            .mockResolvedValueOnce({ ...insight, result: cachedResult, query_status: queryStatus })
+        const statusSpy = jest
+            .spyOn(api.queryStatus, 'get')
+            .mockRejectedValueOnce(new ApiError('Query not found', 404))
+            .mockRejectedValue(new ApiError('Background refresh unavailable', 503))
 
         const request = getInsightWithRetry(
             1,
@@ -542,6 +555,7 @@ describe('getInsightWithRetry', () => {
         expect(result?.result).toEqual(cachedResult)
         expect(Boolean(result?.query_status?.error)).toBe(cachedResult === null)
         expect(getSpy.mock.calls[1][0]).toContain('refresh=async')
+        expect(statusSpy).toHaveBeenCalledTimes(1)
         expect(
             capture.mock.calls.filter(([event]) => event === 'dashboard tile recovered from capacity error')
         ).toHaveLength(cachedResult === null ? 0 : 1)
