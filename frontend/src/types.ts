@@ -7510,6 +7510,7 @@ export type HogFunctionConfigurationContextId =
     | 'batch-export-alerts'
     | 'billing-alerts'
     | 'replay-vision-alerts'
+    | 'replay-vision-requests'
 
 export type HogFunctionSubTemplateIdType =
     | 'early-access-feature-enrollment'
@@ -7531,6 +7532,7 @@ export type HogFunctionSubTemplateIdType =
     | 'health-check-firing'
     | 'health-check-resolved'
     | 'batch-export-run-failed'
+    | 'replay-vision-request-completed'
 
 export type HogFunctionConfigurationType = Omit<
     HogFunctionType,

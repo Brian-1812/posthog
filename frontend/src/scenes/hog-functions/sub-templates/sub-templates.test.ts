@@ -19,6 +19,7 @@ describe('sub-templates', () => {
         ['$batch_export_run_failed', 'batch-export-alerts'],
         ['$billing_alert_firing', 'billing-alerts'],
         ['$replay_vision_alert_match', 'replay-vision-alerts'],
+        ['$replay_vision_request_completed', 'replay-vision-requests'],
         ['$pageview', 'standard'],
         [undefined, 'standard'],
     ])('reads %s as the %s context', (event, expected) => {
