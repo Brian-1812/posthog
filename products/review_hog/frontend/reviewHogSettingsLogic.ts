@@ -615,7 +615,7 @@ export interface reviewHogSettingsLogicMeta {
         triggerUrlResolving: (triggerPrUrl: string, recentReviews: ReviewRecentReviewApi[] | null) => boolean
         showReviewAuthor: (
             reviewsScope: ReviewHogReviewsListScope,
-            viewerGithubLogin: any
+            viewerGithubLogin: string | null
         ) => (review: ReviewRecentReviewApi) => boolean
         perspectiveScoreboard: (reviewDetail: ReviewDetailApi | null) => PerspectiveScore[] | null
     }
