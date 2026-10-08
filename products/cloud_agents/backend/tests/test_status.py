@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from django.test import SimpleTestCase
 
 from parameterized import parameterized
@@ -15,7 +17,7 @@ SWEEP = status_logic.QUOTA_SWEEP_CANCEL_SOURCE
 RUN_ENDS = [None, "done", "cancelled", "error", "timeout", "usage_limit"]
 
 # name, Tasks status, run end, cancel source, compute waived, pull request states, status, reason
-MATRIX: list[tuple[str, str, str | None, str | None, bool, list[str | None], Status, Reason | None]] = [
+MATRIX: list[tuple[str, str, str | None, str | None, bool, Sequence[str | None], Status, Reason | None]] = [
     *[
         (f"{task_status}_with_end_{run_end}", task_status, run_end, SWEEP, True, ["merged"], status, None)
         for task_status, status in [
@@ -102,7 +104,7 @@ class TestStatusMapping(SimpleTestCase):
         run_end: str | None,
         cancel_source: str | None,
         compute_waived: bool,
-        pull_request_states: list[str | None],
+        pull_request_states: Sequence[str | None],
         expected_status: Status,
         expected_reason: Reason | None,
     ) -> None:
