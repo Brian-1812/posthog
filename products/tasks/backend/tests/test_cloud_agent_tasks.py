@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -784,9 +785,9 @@ class TestCloudAgentTaskReads(BaseTest):
 
         everything = summarize(days=3, limit=10)
         assert [(row.task_id, row.compute_cost_cents, row.vcpu_seconds) for row in everything.rows] == [
-            (tasks[0].id, 37, 14_400),
-            (tasks[1].id, 74, 28_800),
-            (tasks[2].id, 110, 43_200),
+            (tasks[0].id, 37, Decimal(14_400)),
+            (tasks[1].id, 74, Decimal(28_800)),
+            (tasks[2].id, 110, Decimal(43_200)),
         ]
         assert everything.truncated is False
         assert [row.task_id for row in summarize(days=2, limit=10).rows] == [tasks[0].id, tasks[1].id]

@@ -124,6 +124,7 @@ class TestCreateRun(RunsAPITestCase):
         assert (call["model"], call["runtime_adapter"]) == (run.config["model"], "claude")
         assert (call["repository"], call["branch"]) == ("acme/app", None)
         assert (call["reasoning_effort"], call["output_schema"]) == (None, None)
+        assert run.task_id is not None
         assert self.tasks.list_run_ids(team_id=self.team.id, task_id=run.task_id) != []
 
     def test_preset_supplies_everything_but_the_prompt(self) -> None:

@@ -74,7 +74,8 @@ def _preset_buckets(team_id: int, rows: tuple[CloudAgentTaskUsageDTO, ...]) -> l
     preset_of_task: dict[UUID, _Preset | None] = {row.task_id: None for row in rows}
     runs = CloudAgentRun.objects.for_team(team_id).filter(task_id__in=list(preset_of_task), preset__isnull=False)
     for task_id, preset_id, preset_name in runs.values_list("task_id", "preset_id", "preset__name"):
-        preset_of_task[task_id] = _Preset(id=preset_id, name=preset_name)
+        if task_id is not None:
+            preset_of_task[task_id] = _Preset(id=preset_id, name=preset_name)
     by_preset = _grouped(rows, preset_of_task)
     # The runs with no preset are the last bucket.
     presets = sorted((preset for preset in by_preset if preset is not None), key=lambda p: (p.name, str(p.id)))

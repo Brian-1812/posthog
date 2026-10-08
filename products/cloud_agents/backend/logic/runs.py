@@ -403,7 +403,11 @@ def list_runs(team_id: int, filters: RunListFilters) -> RunList:
         if status_logic.shares_task_run_statuses(filters.status):
             # Tasks cannot tell `idle` from `done`. The other filters go first, so the states are
             # read only for the runs that can be in the result.
-            matching = list(rows.filter(task_id__in=task_ids).values_list("task_id", flat=True))
+            matching = [
+                task_id
+                for task_id in rows.filter(task_id__in=task_ids).values_list("task_id", flat=True)
+                if task_id is not None
+            ]
             task_ids = task_ids_with_status(team_id, filters.status, matching)
         rows = rows.filter(task_id__in=task_ids)
     # The id breaks a tie between two runs of the same instant, so a page boundary never repeats a run.
