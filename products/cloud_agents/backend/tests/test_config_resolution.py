@@ -1,6 +1,5 @@
 import dataclasses
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -10,58 +9,80 @@ from parameterized import parameterized
 
 from products.cloud_agents.backend.facade.contracts import (
     InvalidInput,
-    ProfileDTO,
+    PresetDTO,
+    RepositoryRef,
     RepositoryRequired,
     ResolvedRunConfig,
     RunCreateInput,
     TeamSettingsDTO,
 )
-from products.cloud_agents.backend.facade.enums import InferenceMode, PrMode, SizeName, SizeShape, size_shape
+from products.cloud_agents.backend.facade.enums import (
+    CloudAgentReasoningEffort,
+    InferenceMode,
+    SizeName,
+    SizeShape,
+    size_shape,
+)
 from products.cloud_agents.backend.logic.config_resolution import render_prompt, resolve_run_config
 
-PROFILE_ID = UUID("01900000-0000-7000-8000-000000000001")
+PRESET_ID = UUID("01900000-0000-7000-8000-000000000001")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+APP = [RepositoryRef(name="acme/app")]
+BASE: dict[str, Any] = {"repositories": APP}
 
 EMPTY_TEAM = TeamSettingsDTO(
-    repository=None,
-    branch=None,
+    repositories=None,
     model=None,
+    reasoning_effort=None,
     size=None,
     inference=None,
     instructions=None,
     create_pr=None,
-    pr_mode=None,
-    max_duration_minutes=None,
-    max_cost_usd=None,
-    default_profile_id=None,
+    idle_minutes=None,
+    output_schema=None,
+    default_preset_id=None,
     max_concurrent_runs=5,
     create_rate_per_hour=60,
     updated_at=None,
 )
-EMPTY_PROFILE = ProfileDTO(
-    id=PROFILE_ID,
+EMPTY_PRESET = PresetDTO(
+    id=PRESET_ID,
     name="default",
     description="",
-    repository=None,
-    branch=None,
+    repositories=None,
     model=None,
+    reasoning_effort=None,
     size=None,
     inference=None,
     instructions=None,
     create_pr=None,
-    pr_mode=None,
-    max_duration_minutes=None,
-    max_cost_usd=None,
+    idle_minutes=None,
+    output_schema=None,
     tags=[],
     created_by_id=None,
     created_at=NOW,
     updated_at=NOW,
 )
 
-# field, call value, profile value, team value, product default
+
+def _schema(field: str) -> dict[str, Any]:
+    return {"type": "object", "properties": {field: {"type": "string"}}}
+
+
+def _repositories(name: str, branch: str | None = None) -> list[RepositoryRef]:
+    return [RepositoryRef(name=name, initial_branch=branch)]
+
+
+# field, call value, preset value, team value, product default
 PRECEDENCE_FIELDS: list[tuple[str, Any, Any, Any, Any]] = [
-    ("branch", "call-branch", "profile-branch", "team-branch", None),
-    ("model", "call-model", "profile-model", "team-model", None),
+    ("model", "call-model", "preset-model", "team-model", None),
+    (
+        "reasoning_effort",
+        CloudAgentReasoningEffort.LOW,
+        CloudAgentReasoningEffort.HIGH,
+        CloudAgentReasoningEffort.MAX,
+        None,
+    ),
     ("size", SizeName.S_1X2, SizeName.S_2X4, SizeName.S_8X32, SizeName.S_4X16),
     # Adjacent levels differ, so a level cannot pass on the value of the level below it.
     ("create_pr", False, True, False, True),
@@ -72,103 +93,139 @@ PRECEDENCE_FIELDS: list[tuple[str, Any, Any, Any, Any]] = [
         InferenceMode.OWN_SUBSCRIPTION,
         InferenceMode.AUTO,
     ),
-    ("pr_mode", PrMode.READY, PrMode.DRAFT, PrMode.READY, PrMode.DRAFT),
-    ("max_duration_minutes", 10, 20, 30, 60),
-    ("max_cost_usd", Decimal("1.00"), Decimal("2.00"), Decimal("3.00"), None),
+    ("idle_minutes", 5, 20, 30, 10),
+    ("output_schema", _schema("call"), _schema("preset"), _schema("team"), None),
 ]
 
 
-def _resolve(call: dict[str, Any], profile: dict[str, Any] | None, team: dict[str, Any]) -> ResolvedRunConfig:
+def _resolve(call: dict[str, Any], preset: dict[str, Any] | None, team: dict[str, Any]) -> ResolvedRunConfig:
     return resolve_run_config(
         RunCreateInput(prompt="Fix the bug", **call),
-        dataclasses.replace(EMPTY_PROFILE, **profile) if profile is not None else None,
+        dataclasses.replace(EMPTY_PRESET, **preset) if preset is not None else None,
         dataclasses.replace(EMPTY_TEAM, **team),
     )
 
 
 class TestResolveRunConfig(SimpleTestCase):
     @parameterized.expand([(field, *values) for field, *values in PRECEDENCE_FIELDS])
-    def test_field_precedence(self, field: str, call: Any, profile: Any, team: Any, default: Any) -> None:
-        base = {"repository": "acme/app"}
-
-        assert getattr(_resolve({**base, field: call}, {field: profile}, {field: team}), field) == call
-        assert getattr(_resolve(base, {field: profile}, {field: team}), field) == profile
-        assert getattr(_resolve(base, {}, {field: team}), field) == team
-        assert getattr(_resolve(base, None, {field: team}), field) == team
-        assert getattr(_resolve(base, {}, {}), field) == default
+    def test_field_precedence(self, field: str, call: Any, preset: Any, team: Any, default: Any) -> None:
+        assert getattr(_resolve({**BASE, field: call}, {field: preset}, {field: team}), field) == call
+        assert getattr(_resolve(BASE, {field: preset}, {field: team}), field) == preset
+        assert getattr(_resolve(BASE, {}, {field: team}), field) == team
+        assert getattr(_resolve(BASE, None, {field: team}), field) == team
+        assert getattr(_resolve(BASE, {}, {}), field) == default
 
     @parameterized.expand(
         [
             (
                 "call",
-                {"repository": "call/repo"},
-                {"repository": "profile/repo"},
-                {"repository": "team/repo"},
-                "call/repo",
+                _repositories("call/repo", "dev"),
+                _repositories("preset/repo"),
+                _repositories("team/repo"),
+                "call",
             ),
-            ("profile", {}, {"repository": "profile/repo"}, {"repository": "team/repo"}, "profile/repo"),
-            ("team", {}, {}, {"repository": "team/repo"}, "team/repo"),
-            ("team_without_profile", {}, None, {"repository": "team/repo"}, "team/repo"),
+            ("preset", None, _repositories("preset/repo", "dev"), _repositories("team/repo"), "preset"),
+            ("empty_call_list", [], _repositories("preset/repo", "dev"), _repositories("team/repo"), "preset"),
+            ("team", None, None, _repositories("team/repo", "dev"), "team"),
+            ("empty_preset_list", None, [], _repositories("team/repo", "dev"), "team"),
         ]
     )
-    def test_repository_precedence(
-        self, _name: str, call: dict, profile: dict | None, team: dict, expected: str
+    def test_repositories_come_whole_from_the_first_level_that_names_one(
+        self,
+        _name: str,
+        call: list[RepositoryRef] | None,
+        preset: list[RepositoryRef] | None,
+        team: list[RepositoryRef] | None,
+        expected: str,
     ) -> None:
-        assert _resolve(call, profile, team).repository == expected
+        config = _resolve({"repositories": call}, {"repositories": preset}, {"repositories": team})
+        # The branch comes with its repository, and never from a different level.
+        assert config.repositories == _repositories(f"{expected}/repo", "dev")
 
-    @parameterized.expand([("no_profile", None), ("empty_profile", {}), ("blank_values", {"repository": ""})])
-    def test_missing_repository_is_rejected(self, _name: str, profile: dict | None) -> None:
-        with self.assertRaises(RepositoryRequired):
-            _resolve({}, profile, {})
+    @parameterized.expand([("no_preset", None), ("empty_preset", {}), ("empty_list", {"repositories": []})])
+    def test_missing_repository_is_rejected(self, _name: str, preset: dict | None) -> None:
+        with self.assertRaises(RepositoryRequired) as raised:
+            _resolve({}, preset, {})
+        assert (raised.exception.attr, raised.exception.code) == ("repositories", "repository_required")
+
+    @parameterized.expand([("call",), ("preset",), ("team",)])
+    def test_more_than_one_repository_is_rejected(self, level: str) -> None:
+        two = [RepositoryRef(name="acme/app"), RepositoryRef(name="acme/web")]
+        levels: dict[str, dict[str, Any]] = {"call": {}, "preset": {}, "team": {}}
+        levels[level] = {"repositories": two}
+        with self.assertRaises(InvalidInput) as raised:
+            _resolve(levels["call"], levels["preset"], levels["team"])
+        assert (raised.exception.attr, raised.exception.message) == (
+            "repositories",
+            "Only one repository is supported for now.",
+        )
 
     @parameterized.expand(
         [
             ("union_keeps_first_position", ["a", "b"], ["b", "c"], ["a", "b", "c"]),
-            ("profile_only", ["a"], None, ["a"]),
+            ("preset_only", ["a"], None, ["a"]),
             ("call_only", [], ["z", "a"], ["z", "a"]),
             ("none", [], None, []),
         ]
     )
     def test_tags_union_is_order_stable(
-        self, _name: str, profile_tags: list[str], call_tags: list[str] | None, expected: list[str]
+        self, _name: str, preset_tags: list[str], call_tags: list[str] | None, expected: list[str]
     ) -> None:
-        config = _resolve({"repository": "acme/app", "tags": call_tags}, {"tags": profile_tags}, {})
+        config = _resolve({**BASE, "tags": call_tags}, {"tags": preset_tags}, {})
         assert config.tags == expected
 
     @parameterized.expand(
         [
-            ("all_levels", "call", "profile", "team", "team\n\nprofile\n\ncall"),
+            ("all_levels", "call", "preset", "team", "team\n\npreset\n\ncall"),
             ("skips_missing_levels", "call", None, "team", "team\n\ncall"),
             ("skips_blank_levels", "call", "  ", None, "call"),
             ("none", None, None, None, None),
         ]
     )
-    def test_instructions_join_team_then_profile_then_call(
-        self, _name: str, call: str | None, profile: str | None, team: str | None, expected: str | None
+    def test_instructions_join_team_then_preset_then_call(
+        self, _name: str, call: str | None, preset: str | None, team: str | None, expected: str | None
     ) -> None:
-        config = _resolve(
-            {"repository": "acme/app", "instructions": call}, {"instructions": profile}, {"instructions": team}
-        )
+        config = _resolve({**BASE, "instructions": call}, {"instructions": preset}, {"instructions": team})
         assert config.instructions == expected
 
-    @parameterized.expand([(5, True), (240, True), (4, False), (241, False), (0, False)])
-    def test_duration_bounds(self, minutes: int, valid: bool) -> None:
+    @parameterized.expand([(1, True), (120, True), (0, False), (121, False)])
+    def test_idle_minutes_bounds(self, minutes: int, valid: bool) -> None:
         # The team level, because an API serializer does not check a value that a row already holds.
         if valid:
-            assert _resolve({"repository": "acme/app"}, None, {"max_duration_minutes": minutes})
+            assert _resolve(BASE, None, {"idle_minutes": minutes}).idle_minutes == minutes
         else:
             with self.assertRaises(InvalidInput) as raised:
-                _resolve({"repository": "acme/app"}, None, {"max_duration_minutes": minutes})
-            assert raised.exception.attr == "max_duration_minutes"
+                _resolve(BASE, None, {"idle_minutes": minutes})
+            assert raised.exception.attr == "idle_minutes"
 
-    def test_profile_id(self) -> None:
-        config = _resolve({"repository": "acme/app"}, {"description": "UI work"}, {})
-        assert config.profile_id == PROFILE_ID
-        assert _resolve({"repository": "acme/app"}, None, {}).profile_id is None
+    @parameterized.expand(
+        [
+            ("not_an_object_schema", {"type": "string"}),
+            ("no_type", {"properties": {"answer": {"type": "string"}}}),
+            ("reserved_property", {"type": "object", "properties": {"pr_url": {"type": "string"}}}),
+            ("not_a_json_schema", {"type": "object", "properties": {"answer": {"type": "text"}}}),
+            ("too_large", {"type": "object", "description": "x" * 20000}),
+        ]
+    )
+    def test_output_schema_that_tasks_cannot_use_is_rejected(self, _name: str, schema: dict[str, Any]) -> None:
+        with self.assertRaises(InvalidInput) as raised:
+            _resolve(BASE, None, {"output_schema": schema})
+        assert raised.exception.attr == "output_schema"
+
+    def test_preset_id(self) -> None:
+        config = _resolve(BASE, {"description": "UI work"}, {})
+        assert config.preset_id == PRESET_ID
+        assert _resolve(BASE, None, {}).preset_id is None
 
     def test_config_json_round_trip(self) -> None:
         config = _resolve(
-            {"repository": "acme/app", "max_cost_usd": Decimal("12.50"), "tags": ["a"], "size": SizeName.S_16X64},
+            {
+                "repositories": _repositories("acme/app", "main"),
+                "tags": ["a"],
+                "size": SizeName.S_16X64,
+                "reasoning_effort": CloudAgentReasoningEffort.HIGH,
+                "output_schema": _schema("answer"),
+            },
             {"instructions": "Use pnpm"},
             {},
         )
@@ -178,7 +235,7 @@ class TestResolveRunConfig(SimpleTestCase):
     def test_render_prompt_puts_instructions_above_prompt(
         self, _name: str, instructions: str | None, has_block: bool
     ) -> None:
-        config = _resolve({"repository": "acme/app", "instructions": instructions}, None, {})
+        config = _resolve({**BASE, "instructions": instructions}, None, {})
         rendered = render_prompt(config, "Fix the bug")
         if has_block:
             assert rendered.index("Use pnpm") < rendered.index("Fix the bug")

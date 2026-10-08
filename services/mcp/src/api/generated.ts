@@ -22838,32 +22838,26 @@ export namespace Schemas {
     /**
      * * `queued` - Queued
      * * `running` - Running
-     * * `completed` - Completed
-     * * `failed` - Failed
-     * * `cancelled` - Cancelled
+     * * `ended` - Ended
      */
-    export type CloudAgentRunStatusEnum = typeof CloudAgentRunStatusEnum[keyof typeof CloudAgentRunStatusEnum];
+    export type CloudAgentSessionStatusEnum = typeof CloudAgentSessionStatusEnum[keyof typeof CloudAgentSessionStatusEnum];
 
 
-    export const CloudAgentRunStatusEnum = {
+    export const CloudAgentSessionStatusEnum = {
       Queued: 'queued',
       Running: 'running',
-      Completed: 'completed',
-      Failed: 'failed',
-      Cancelled: 'cancelled',
+      Ended: 'ended',
     } as const;
 
     export interface CloudAgentAgentSession {
       /** Position of the session in the run, from 1. */
       index: number;
-      /** Status of the session.
+      /** `queued` waits for a sandbox, `running` has an agent at work, and `ended` has no sandbox.
        *
        * * `queued` - Queued
        * * `running` - Running
-       * * `completed` - Completed
-       * * `failed` - Failed
-       * * `cancelled` - Cancelled */
-      status: CloudAgentRunStatusEnum;
+       * * `ended` - Ended */
+      status: CloudAgentSessionStatusEnum;
       /**
          * When the agent started work in this session.
          * @nullable
@@ -23010,48 +23004,278 @@ export namespace Schemas {
     }
 
     /**
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+     * @nullable
+     */
+    export type CloudAgentPresetOutputSchema = { [key: string]: unknown } | null;
+
+    export interface CloudAgentRepository {
+      /**
+         * GitHub repository, in the format `owner/name`.
+         * @maxLength 255
+         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+         */
+      name: string;
+      /**
+         * Branch that the agent starts from. Null uses the default branch of the repository.
+         * @maxLength 255
+         * @nullable
+         */
+      initial_branch?: string | null;
+    }
+
+    /**
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode
+     */
+    export type CloudAgentReasoningEffortEnum = typeof CloudAgentReasoningEffortEnum[keyof typeof CloudAgentReasoningEffortEnum];
+
+
+    export const CloudAgentReasoningEffortEnum = {
+      Low: 'low',
+      Medium: 'medium',
+      High: 'high',
+      Xhigh: 'xhigh',
+      Max: 'max',
+      Ultracode: 'ultracode',
+    } as const;
+
+    /**
+     * The run defaults that a preset and the project settings share. A null value sets no default.
+     */
+    export interface CloudAgentPreset {
+      /**
+         * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
+         * @nullable
+         */
+      repositories?: CloudAgentRepository[] | null;
+      /**
+         * Default model for the agent. Null lets PostHog select the model.
+         * @maxLength 100
+         * @nullable
+         */
+      model?: string | null;
+      /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+       *
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort?: CloudAgentReasoningEffortEnum | null;
+      /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
+       *
+       * * `1x2` - 1 vCPU, 2 GiB
+       * * `2x4` - 2 vCPU, 4 GiB
+       * * `2x8` - 2 vCPU, 8 GiB
+       * * `4x8` - 4 vCPU, 8 GiB
+       * * `4x16` - 4 vCPU, 16 GiB
+       * * `8x16` - 8 vCPU, 16 GiB
+       * * `8x32` - 8 vCPU, 32 GiB
+       * * `16x64` - 16 vCPU, 64 GiB */
+      size?: SizeNameEnum | null;
+      /** How the agent pays for model usage. `auto` uses your own subscription when one is connected for the runtime, and PostHog inference otherwise. Null uses the product default.
+       *
+       * * `auto` - Auto
+       * * `own_subscription` - Own Subscription
+       * * `posthog` - PostHog */
+      inference?: InferenceModeEnum | null;
+      /**
+         * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
+         * @maxLength 20000
+         * @nullable
+         */
+      instructions?: string | null;
+      /**
+         * Whether the agent opens a pull request when it finishes. Null uses the product default.
+         * @nullable
+         */
+      create_pr?: boolean | null;
+      /**
+         * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+         * @minimum 1
+         * @maximum 120
+         * @nullable
+         */
+      idle_minutes?: number | null;
+      /**
+         * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+         * @nullable
+         */
+      output_schema?: CloudAgentPresetOutputSchema;
+      /** ID of the preset. */
+      id: string;
+      /** Name of the preset. */
+      name: string;
+      /** What this preset is for. */
+      description: string;
+      /**
+         * Tags added to every run that uses this preset.
+         * @maxItems 20
+         * @items.maxLength 50
+         */
+      tags: string[];
+      /**
+         * ID of the user who created the preset.
+         * @nullable
+         */
+      created_by: number | null;
+      /** When the preset was created. */
+      created_at: string;
+      /** When the preset was last changed. */
+      updated_at: string;
+    }
+
+    /**
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+     * @nullable
+     */
+    export type CloudAgentPresetCreateOutputSchema = { [key: string]: unknown } | null;
+
+    /**
+     * The run defaults that a preset and the project settings share. A null value sets no default.
+     */
+    export interface CloudAgentPresetCreate {
+      /**
+         * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
+         * @nullable
+         */
+      repositories?: CloudAgentRepository[] | null;
+      /**
+         * Default model for the agent. Null lets PostHog select the model.
+         * @maxLength 100
+         * @nullable
+         */
+      model?: string | null;
+      /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+       *
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort?: CloudAgentReasoningEffortEnum | null;
+      /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
+       *
+       * * `1x2` - 1 vCPU, 2 GiB
+       * * `2x4` - 2 vCPU, 4 GiB
+       * * `2x8` - 2 vCPU, 8 GiB
+       * * `4x8` - 4 vCPU, 8 GiB
+       * * `4x16` - 4 vCPU, 16 GiB
+       * * `8x16` - 8 vCPU, 16 GiB
+       * * `8x32` - 8 vCPU, 32 GiB
+       * * `16x64` - 16 vCPU, 64 GiB */
+      size?: SizeNameEnum | null;
+      /** How the agent pays for model usage. `auto` uses your own subscription when one is connected for the runtime, and PostHog inference otherwise. Null uses the product default.
+       *
+       * * `auto` - Auto
+       * * `own_subscription` - Own Subscription
+       * * `posthog` - PostHog */
+      inference?: InferenceModeEnum | null;
+      /**
+         * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
+         * @maxLength 20000
+         * @nullable
+         */
+      instructions?: string | null;
+      /**
+         * Whether the agent opens a pull request when it finishes. Null uses the product default.
+         * @nullable
+         */
+      create_pr?: boolean | null;
+      /**
+         * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+         * @minimum 1
+         * @maximum 120
+         * @nullable
+         */
+      idle_minutes?: number | null;
+      /**
+         * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+         * @nullable
+         */
+      output_schema?: CloudAgentPresetCreateOutputSchema;
+      /**
+         * What this preset is for.
+         * @maxLength 2000
+         */
+      description?: string;
+      /**
+         * Tags added to every run that uses this preset.
+         * @maxItems 20
+         * @items.maxLength 50
+         */
+      tags?: string[];
+      /**
+         * Name of the preset. It is unique in the project, without regard to case.
+         * @maxLength 100
+         */
+      name: string;
+    }
+
+    /**
      * Your own key and value pairs.
      */
     export type CloudAgentRunMetadata = {[key: string]: string};
 
     /**
+     * * `queued` - Queued
+     * * `running` - Running
+     * * `idle` - Idle
      * * `done` - Done
-     * * `cancelled` - Cancelled
-     * * `error` - Error
-     * * `timeout` - Timeout
-     * * `budget_exceeded` - Budget Exceeded
-     * * `usage_limit` - Usage Limit
      */
-    export type StopReasonEnum = typeof StopReasonEnum[keyof typeof StopReasonEnum];
+    export type CloudAgentRunStatusEnum = typeof CloudAgentRunStatusEnum[keyof typeof CloudAgentRunStatusEnum];
 
 
-    export const StopReasonEnum = {
+    export const CloudAgentRunStatusEnum = {
+      Queued: 'queued',
+      Running: 'running',
+      Idle: 'idle',
       Done: 'done',
-      Cancelled: 'cancelled',
-      Error: 'error',
-      Timeout: 'timeout',
-      BudgetExceeded: 'budget_exceeded',
-      UsageLimit: 'usage_limit',
     } as const;
 
-    export interface CloudAgentRunProfileRef {
-      /** ID of the profile. */
+    /**
+     * * `turn_closed` - Turn Closed
+     * * `provision_failed` - Provision Failed
+     * * `unexpected_failure` - Unexpected Failure
+     * * `timed_out` - Timed Out
+     * * `credit_spent` - Credit Spent
+     * * `finished` - Finished
+     * * `closed` - Closed
+     * * `cancelled` - Cancelled
+     */
+    export type CloudAgentRunStatusReasonEnum = typeof CloudAgentRunStatusReasonEnum[keyof typeof CloudAgentRunStatusReasonEnum];
+
+
+    export const CloudAgentRunStatusReasonEnum = {
+      TurnClosed: 'turn_closed',
+      ProvisionFailed: 'provision_failed',
+      UnexpectedFailure: 'unexpected_failure',
+      TimedOut: 'timed_out',
+      CreditSpent: 'credit_spent',
+      Finished: 'finished',
+      Closed: 'closed',
+      Cancelled: 'cancelled',
+    } as const;
+
+    export interface CloudAgentRunPresetRef {
+      /** ID of the preset. */
       id: string;
-      /** Name of the profile. */
+      /** Name of the preset. */
       name: string;
     }
 
     /**
-     * * `draft` - Draft
-     * * `ready` - Ready
+     * The JSON Schema that the result of the agent must match. Null when the run has none.
+     * @nullable
      */
-    export type PrModeEnum = typeof PrModeEnum[keyof typeof PrModeEnum];
-
-
-    export const PrModeEnum = {
-      Draft: 'draft',
-      Ready: 'ready',
-    } as const;
+    export type CloudAgentRunConfigOutputSchema = { [key: string]: unknown } | null;
 
     /**
      * Reads a run: the stored configuration is in `config`, and the priced size is on the run.
@@ -23062,6 +23286,15 @@ export namespace Schemas {
          * @nullable
          */
       model: string | null;
+      /** How much the model reasons before it answers. Null uses the default of the model.
+       *
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort: CloudAgentReasoningEffortEnum | null;
       /** Sandbox size of the run. It is fixed for the life of the run. */
       size: CloudAgentSize;
       /** How the run pays for model usage: `posthog` for PostHog inference, `own_subscription` for the subscription of the user.
@@ -23072,22 +23305,22 @@ export namespace Schemas {
       inference: InferenceModeEnum;
       /** Whether the agent opens a pull request when it finishes. */
       create_pr: boolean;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet.
-       *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode: PrModeEnum;
-      /** Time limit of the run in minutes. */
-      max_duration_minutes: number;
+      /** How many minutes the sandbox waits with no activity before it stops. */
+      idle_minutes: number;
       /**
-         * Cost limit of the run in US dollars. Reserved. Not enforced yet.
+         * The JSON Schema that the result of the agent must match. Null when the run has none.
          * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
          */
-      max_cost_usd: string | null;
-      /** Whether the agent got instructions from the run, its profile or the project settings. */
+      output_schema: CloudAgentRunConfigOutputSchema;
+      /** Whether the agent got instructions from the run, its preset or the project settings. */
       readonly instructions_applied: boolean;
     }
+
+    /**
+     * The JSON result that the agent returned for the `output_schema` of the run. Null when the run has no schema, or when the agent returned no result yet.
+     * @nullable
+     */
+    export type CloudAgentRunResultOutput = { [key: string]: unknown } | null;
 
     export interface CloudAgentRunResult {
       /**
@@ -23102,6 +23335,11 @@ export namespace Schemas {
          * @nullable
          */
       summary: string | null;
+      /**
+         * The JSON result that the agent returned for the `output_schema` of the run. Null when the run has no schema, or when the agent returned no result yet.
+         * @nullable
+         */
+      output: CloudAgentRunResultOutput;
     }
 
     /**
@@ -23174,28 +23412,29 @@ export namespace Schemas {
     export interface CloudAgentRun {
       /** ID of the run. */
       id: string;
-      /** `queued` waits for a sandbox, `running` has an agent at work, and `completed`, `failed` and `cancelled` are final until you send a new message.
+      /** `queued` waits for a sandbox. `running` has an agent at work. `idle` has no sandbox, and a message continues the run. `done` is final, and a message is refused.
        *
        * * `queued` - Queued
        * * `running` - Running
-       * * `completed` - Completed
-       * * `failed` - Failed
-       * * `cancelled` - Cancelled */
+       * * `idle` - Idle
+       * * `done` - Done */
       status: CloudAgentRunStatusEnum;
-      /** Why the run stopped. Null while the run is active.
+      /** Why the run is `idle` or `done`. Null while the run is `queued` or `running`. An `idle` run has `turn_closed` when the agent finished its turn, `timed_out`, `credit_spent`, `provision_failed` or `unexpected_failure`. A `done` run has `finished` when its pull request was merged, `closed` when every pull request was closed and not merged, or `cancelled`.
        *
-       * * `done` - Done
-       * * `cancelled` - Cancelled
-       * * `error` - Error
-       * * `timeout` - Timeout
-       * * `budget_exceeded` - Budget Exceeded
-       * * `usage_limit` - Usage Limit */
-      stop_reason: StopReasonEnum | null;
+       * * `turn_closed` - Turn Closed
+       * * `provision_failed` - Provision Failed
+       * * `unexpected_failure` - Unexpected Failure
+       * * `timed_out` - Timed Out
+       * * `credit_spent` - Credit Spent
+       * * `finished` - Finished
+       * * `closed` - Closed
+       * * `cancelled` - Cancelled */
+      status_reason: CloudAgentRunStatusReasonEnum | null;
       /**
-         * What went wrong and what to do next. Null when the run has no error.
+         * What the status reason means for you and what to do next. Null when there is nothing to add.
          * @nullable
          */
-      error: string | null;
+      status_detail: string | null;
       /** When the run was created. */
       created_at: string;
       /**
@@ -23204,33 +23443,28 @@ export namespace Schemas {
          */
       started_at: string | null;
       /**
-         * When the run stopped.
+         * When the last agent session ended. Null while the run is `queued` or `running`.
          * @nullable
          */
-      completed_at: string | null;
+      ended_at: string | null;
       /** When the run last changed. */
       updated_at: string;
       /** The task that the run started with. */
       prompt: string;
-      /** GitHub repository of the run, in the format `owner/name`. */
-      repository: string;
-      /**
-         * Base branch of the run. Null uses the default branch of the repository.
-         * @nullable
-         */
-      branch: string | null;
-      /** The profile that the run used. Null when it used none. */
-      readonly profile: CloudAgentRunProfileRef | null;
+      /** The repositories that the agent works in. */
+      repositories: CloudAgentRepository[];
+      /** The preset that the run used. Null when it used none. */
+      readonly preset: CloudAgentRunPresetRef | null;
       /** The configuration that the run uses. */
       config: CloudAgentRunConfig;
       /** What the agent produced. */
       result: CloudAgentRunResult;
       /** What the run cost. */
       cost: CloudAgentRunCost;
-      /** The agent sessions of the run, oldest first. A message to a run that stopped starts a new session. */
+      /** The agent sessions of the run, oldest first. A message to an `idle` run starts a new session. */
       agent_sessions: CloudAgentAgentSession[];
       /**
-         * Tags of the run, including the tags of its profile.
+         * Tags of the run, including the tags of its preset.
          * @maxItems 20
          * @items.maxLength 50
          */
@@ -23248,33 +23482,40 @@ export namespace Schemas {
     }
 
     /**
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+     * @nullable
+     */
+    export type CloudAgentRunCreateOutputSchema = { [key: string]: unknown } | null;
+
+    /**
      * Your own key and value pairs, stored with the run and returned with it. At most 16 pairs. Keys and values are strings.
      */
     export type CloudAgentRunCreateMetadata = {[key: string]: string};
 
     /**
-     * The run defaults that a profile and the project settings share. A null value sets no default.
+     * The run defaults that a preset and the project settings share. A null value sets no default.
      */
     export interface CloudAgentRunCreate {
       /**
-         * GitHub repository that the agent works in, in the format `owner/name`. Required unless the profile or the project settings set a default.
-         * @maxLength 255
-         * @nullable
-         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-         */
-      repository?: string | null;
-      /**
-         * Default base branch. Null uses the default branch of the repository.
-         * @maxLength 255
+         * The repositories that the agent works in. Only one repository is supported for now. Required unless the preset or the project settings set a default.
          * @nullable
          */
-      branch?: string | null;
+      repositories?: CloudAgentRepository[] | null;
       /**
          * Default model for the agent. Null lets PostHog select the model.
          * @maxLength 100
          * @nullable
          */
       model?: string | null;
+      /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+       *
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort?: CloudAgentReasoningEffortEnum | null;
       /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
        *
        * * `1x2` - 1 vCPU, 2 GiB
@@ -23293,7 +23534,7 @@ export namespace Schemas {
        * * `posthog` - PostHog */
       inference?: InferenceModeEnum | null;
       /**
-         * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+         * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
          * @maxLength 20000
          * @nullable
          */
@@ -23303,37 +23544,31 @@ export namespace Schemas {
          * @nullable
          */
       create_pr?: boolean | null;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-       *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode?: PrModeEnum | null;
       /**
-         * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-         * @minimum 5
-         * @maximum 240
+         * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+         * @minimum 1
+         * @maximum 120
          * @nullable
          */
-      max_duration_minutes?: number | null;
+      idle_minutes?: number | null;
       /**
-         * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
+         * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
          * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
          */
-      max_cost_usd?: string | null;
+      output_schema?: CloudAgentRunCreateOutputSchema;
       /**
          * The task for the agent, in plain language.
          * @maxLength 64000
          */
       prompt: string;
       /**
-         * ID or name of the profile whose defaults the run uses. Null uses the default profile of the project, when one is set.
+         * ID or name of the preset whose defaults the run uses. Null uses the default preset of the project, when one is set.
          * @maxLength 100
          * @nullable
          */
-      profile?: string | null;
+      preset?: string | null;
       /**
-         * Tags for the run. The tags of the profile are added to them.
+         * Tags for the run. The tags of the preset are added to them.
          * @maxItems 20
          * @items.maxLength 50
          */
@@ -23360,7 +23595,7 @@ export namespace Schemas {
     }
 
     export interface CloudAgentRunMessageResponse {
-      /** True when the message started a new agent session, because the run had stopped. False when the running agent got the message. */
+      /** True when the message started a new agent session, because the run was `idle`. False when the running agent got the message. */
       resumed: boolean;
       /** The run after the message. */
       run: CloudAgentRun;
@@ -23405,28 +23640,35 @@ export namespace Schemas {
     }
 
     /**
-     * The run defaults that a profile and the project settings share. A null value sets no default.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+     * @nullable
+     */
+    export type CloudAgentSettingsOutputSchema = { [key: string]: unknown } | null;
+
+    /**
+     * The run defaults that a preset and the project settings share. A null value sets no default.
      */
     export interface CloudAgentSettings {
       /**
-         * Default GitHub repository, in the format `owner/name`. Null sets no default.
-         * @maxLength 255
-         * @nullable
-         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-         */
-      repository?: string | null;
-      /**
-         * Default base branch. Null uses the default branch of the repository.
-         * @maxLength 255
+         * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
          * @nullable
          */
-      branch?: string | null;
+      repositories?: CloudAgentRepository[] | null;
       /**
          * Default model for the agent. Null lets PostHog select the model.
          * @maxLength 100
          * @nullable
          */
       model?: string | null;
+      /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+       *
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort?: CloudAgentReasoningEffortEnum | null;
       /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
        *
        * * `1x2` - 1 vCPU, 2 GiB
@@ -23445,7 +23687,7 @@ export namespace Schemas {
        * * `posthog` - PostHog */
       inference?: InferenceModeEnum | null;
       /**
-         * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+         * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
          * @maxLength 20000
          * @nullable
          */
@@ -23455,29 +23697,23 @@ export namespace Schemas {
          * @nullable
          */
       create_pr?: boolean | null;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-       *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode?: PrModeEnum | null;
       /**
-         * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-         * @minimum 5
-         * @maximum 240
+         * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+         * @minimum 1
+         * @maximum 120
          * @nullable
          */
-      max_duration_minutes?: number | null;
+      idle_minutes?: number | null;
       /**
-         * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-         * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-         */
-      max_cost_usd?: string | null;
-      /**
-         * ID of the profile that a run uses when it names no profile.
+         * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
          * @nullable
          */
-      default_profile: string | null;
+      output_schema?: CloudAgentSettingsOutputSchema;
+      /**
+         * ID of the preset that a run uses when it names no preset.
+         * @nullable
+         */
+      default_preset: string | null;
       /** How many runs the project can have active at the same time. */
       max_concurrent_runs: number;
       /** How many runs the project can start in one hour. */
@@ -23521,12 +23757,12 @@ export namespace Schemas {
 
     export interface CloudAgentUsageBucket {
       /**
-         * The UTC date of the bucket for `group_by=day`. The profile ID for `group_by=profile`, or null for the runs that used no profile.
+         * The UTC date of the bucket for `group_by=day`. The preset ID for `group_by=preset`, or null for the runs that used no preset.
          * @nullable
          */
       key: string | null;
       /**
-         * Name of the profile for `group_by=profile`. Null for other buckets.
+         * Name of the preset for `group_by=preset`. Null for other buckets.
          * @nullable
          */
       name: string | null;
@@ -23536,14 +23772,14 @@ export namespace Schemas {
 
     /**
      * * `day` - Day
-     * * `profile` - Profile
+     * * `preset` - Preset
      */
     export type UsageGroupByEnum = typeof UsageGroupByEnum[keyof typeof UsageGroupByEnum];
 
 
     export const UsageGroupByEnum = {
       Day: 'day',
-      Profile: 'profile',
+      Preset: 'preset',
     } as const;
 
     export interface CloudAgentUsageSummary {
@@ -23554,11 +23790,11 @@ export namespace Schemas {
       /** How the buckets are grouped.
        *
        * * `day` - Day
-       * * `profile` - Profile */
+       * * `preset` - Preset */
       group_by: UsageGroupByEnum;
       /** Usage of all runs created in the range. */
       totals: CloudAgentUsageTotals;
-      /** Usage for each day or for each profile. */
+      /** Usage for each day or for each preset. */
       buckets: CloudAgentUsageBucket[];
     }
 
@@ -69030,6 +69266,15 @@ export namespace Schemas {
       results?: ClickhouseEvent[];
     }
 
+    export interface PaginatedCloudAgentPresetList {
+      count: number;
+      /** @nullable */
+      next?: string | null;
+      /** @nullable */
+      previous?: string | null;
+      results: CloudAgentPreset[];
+    }
+
     export interface PaginatedCloudAgentRunList {
       count: number;
       /** @nullable */
@@ -70602,107 +70847,6 @@ export namespace Schemas {
       /** @nullable */
       previous?: string | null;
       results: ProductTour[];
-    }
-
-    /**
-     * The run defaults that a profile and the project settings share. A null value sets no default.
-     */
-    export interface Profile {
-      /**
-         * Default GitHub repository, in the format `owner/name`. Null sets no default.
-         * @maxLength 255
-         * @nullable
-         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-         */
-      repository?: string | null;
-      /**
-         * Default base branch. Null uses the default branch of the repository.
-         * @maxLength 255
-         * @nullable
-         */
-      branch?: string | null;
-      /**
-         * Default model for the agent. Null lets PostHog select the model.
-         * @maxLength 100
-         * @nullable
-         */
-      model?: string | null;
-      /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
-       *
-       * * `1x2` - 1 vCPU, 2 GiB
-       * * `2x4` - 2 vCPU, 4 GiB
-       * * `2x8` - 2 vCPU, 8 GiB
-       * * `4x8` - 4 vCPU, 8 GiB
-       * * `4x16` - 4 vCPU, 16 GiB
-       * * `8x16` - 8 vCPU, 16 GiB
-       * * `8x32` - 8 vCPU, 32 GiB
-       * * `16x64` - 16 vCPU, 64 GiB */
-      size?: SizeNameEnum | null;
-      /** How the agent pays for model usage. `auto` uses your own subscription when one is connected for the runtime, and PostHog inference otherwise. Null uses the product default.
-       *
-       * * `auto` - Auto
-       * * `own_subscription` - Own Subscription
-       * * `posthog` - PostHog */
-      inference?: InferenceModeEnum | null;
-      /**
-         * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
-         * @maxLength 20000
-         * @nullable
-         */
-      instructions?: string | null;
-      /**
-         * Whether the agent opens a pull request when it finishes. Null uses the product default.
-         * @nullable
-         */
-      create_pr?: boolean | null;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-       *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode?: PrModeEnum | null;
-      /**
-         * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-         * @minimum 5
-         * @maximum 240
-         * @nullable
-         */
-      max_duration_minutes?: number | null;
-      /**
-         * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-         * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-         */
-      max_cost_usd?: string | null;
-      /** ID of the profile. */
-      id: string;
-      /** Name of the profile. */
-      name: string;
-      /** What this profile is for. */
-      description: string;
-      /**
-         * Tags added to every run that uses this profile.
-         * @maxItems 20
-         * @items.maxLength 50
-         */
-      tags: string[];
-      /**
-         * ID of the user who created the profile.
-         * @nullable
-         */
-      created_by: number | null;
-      /** When the profile was created. */
-      created_at: string;
-      /** When the profile was last changed. */
-      updated_at: string;
-    }
-
-    export interface PaginatedProfileList {
-      count: number;
-      /** @nullable */
-      next?: string | null;
-      /** @nullable */
-      previous?: string | null;
-      results: Profile[];
     }
 
     /**
@@ -77166,28 +77310,35 @@ export namespace Schemas {
     }
 
     /**
-     * The run defaults that a profile and the project settings share. A null value sets no default.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+     * @nullable
      */
-    export interface PatchedCloudAgentSettingsUpdate {
+    export type PatchedCloudAgentPresetUpdateOutputSchema = { [key: string]: unknown } | null;
+
+    /**
+     * The run defaults that a preset and the project settings share. A null value sets no default.
+     */
+    export interface PatchedCloudAgentPresetUpdate {
       /**
-         * Default GitHub repository, in the format `owner/name`. Null sets no default.
-         * @maxLength 255
-         * @nullable
-         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-         */
-      repository?: string | null;
-      /**
-         * Default base branch. Null uses the default branch of the repository.
-         * @maxLength 255
+         * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
          * @nullable
          */
-      branch?: string | null;
+      repositories?: CloudAgentRepository[] | null;
       /**
          * Default model for the agent. Null lets PostHog select the model.
          * @maxLength 100
          * @nullable
          */
       model?: string | null;
+      /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+       *
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort?: CloudAgentReasoningEffortEnum | null;
       /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
        *
        * * `1x2` - 1 vCPU, 2 GiB
@@ -77206,7 +77357,7 @@ export namespace Schemas {
        * * `posthog` - PostHog */
       inference?: InferenceModeEnum | null;
       /**
-         * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+         * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
          * @maxLength 20000
          * @nullable
          */
@@ -77216,29 +77367,111 @@ export namespace Schemas {
          * @nullable
          */
       create_pr?: boolean | null;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
+      /**
+         * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+         * @minimum 1
+         * @maximum 120
+         * @nullable
+         */
+      idle_minutes?: number | null;
+      /**
+         * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+         * @nullable
+         */
+      output_schema?: PatchedCloudAgentPresetUpdateOutputSchema;
+      /**
+         * What this preset is for.
+         * @maxLength 2000
+         */
+      description?: string;
+      /**
+         * Tags added to every run that uses this preset.
+         * @maxItems 20
+         * @items.maxLength 50
+         */
+      tags?: string[];
+      /**
+         * Name of the preset. It is unique in the project, without regard to case.
+         * @maxLength 100
+         */
+      name?: string;
+    }
+
+    /**
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+     * @nullable
+     */
+    export type PatchedCloudAgentSettingsUpdateOutputSchema = { [key: string]: unknown } | null;
+
+    /**
+     * The run defaults that a preset and the project settings share. A null value sets no default.
+     */
+    export interface PatchedCloudAgentSettingsUpdate {
+      /**
+         * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
+         * @nullable
+         */
+      repositories?: CloudAgentRepository[] | null;
+      /**
+         * Default model for the agent. Null lets PostHog select the model.
+         * @maxLength 100
+         * @nullable
+         */
+      model?: string | null;
+      /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
        *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode?: PrModeEnum | null;
+       * * `low` - Low
+       * * `medium` - Medium
+       * * `high` - High
+       * * `xhigh` - Extra high
+       * * `max` - Max
+       * * `ultracode` - Ultracode */
+      reasoning_effort?: CloudAgentReasoningEffortEnum | null;
+      /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
+       *
+       * * `1x2` - 1 vCPU, 2 GiB
+       * * `2x4` - 2 vCPU, 4 GiB
+       * * `2x8` - 2 vCPU, 8 GiB
+       * * `4x8` - 4 vCPU, 8 GiB
+       * * `4x16` - 4 vCPU, 16 GiB
+       * * `8x16` - 8 vCPU, 16 GiB
+       * * `8x32` - 8 vCPU, 32 GiB
+       * * `16x64` - 16 vCPU, 64 GiB */
+      size?: SizeNameEnum | null;
+      /** How the agent pays for model usage. `auto` uses your own subscription when one is connected for the runtime, and PostHog inference otherwise. Null uses the product default.
+       *
+       * * `auto` - Auto
+       * * `own_subscription` - Own Subscription
+       * * `posthog` - PostHog */
+      inference?: InferenceModeEnum | null;
       /**
-         * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-         * @minimum 5
-         * @maximum 240
+         * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
+         * @maxLength 20000
          * @nullable
          */
-      max_duration_minutes?: number | null;
+      instructions?: string | null;
       /**
-         * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-         * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-         */
-      max_cost_usd?: string | null;
-      /**
-         * ID of the profile that a run uses when it names no profile. Null sets no default profile.
+         * Whether the agent opens a pull request when it finishes. Null uses the product default.
          * @nullable
          */
-      default_profile?: string | null;
+      create_pr?: boolean | null;
+      /**
+         * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+         * @minimum 1
+         * @maximum 120
+         * @nullable
+         */
+      idle_minutes?: number | null;
+      /**
+         * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+         * @nullable
+         */
+      output_schema?: PatchedCloudAgentSettingsUpdateOutputSchema;
+      /**
+         * ID of the preset that a run uses when it names no preset. Null sets no default preset.
+         * @nullable
+         */
+      default_preset?: string | null;
     }
 
     export type PatchedClusteringJobEventFiltersItem = { [key: string]: unknown };
@@ -81589,93 +81822,6 @@ export namespace Schemas {
        * * `app` - app
        * * `toolbar` - toolbar */
       creation_context?: ProductTourSerializerCreateUpdateOnlyCreationContextEnum;
-    }
-
-    /**
-     * The run defaults that a profile and the project settings share. A null value sets no default.
-     */
-    export interface PatchedProfileUpdate {
-      /**
-         * Default GitHub repository, in the format `owner/name`. Null sets no default.
-         * @maxLength 255
-         * @nullable
-         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-         */
-      repository?: string | null;
-      /**
-         * Default base branch. Null uses the default branch of the repository.
-         * @maxLength 255
-         * @nullable
-         */
-      branch?: string | null;
-      /**
-         * Default model for the agent. Null lets PostHog select the model.
-         * @maxLength 100
-         * @nullable
-         */
-      model?: string | null;
-      /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
-       *
-       * * `1x2` - 1 vCPU, 2 GiB
-       * * `2x4` - 2 vCPU, 4 GiB
-       * * `2x8` - 2 vCPU, 8 GiB
-       * * `4x8` - 4 vCPU, 8 GiB
-       * * `4x16` - 4 vCPU, 16 GiB
-       * * `8x16` - 8 vCPU, 16 GiB
-       * * `8x32` - 8 vCPU, 32 GiB
-       * * `16x64` - 16 vCPU, 64 GiB */
-      size?: SizeNameEnum | null;
-      /** How the agent pays for model usage. `auto` uses your own subscription when one is connected for the runtime, and PostHog inference otherwise. Null uses the product default.
-       *
-       * * `auto` - Auto
-       * * `own_subscription` - Own Subscription
-       * * `posthog` - PostHog */
-      inference?: InferenceModeEnum | null;
-      /**
-         * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
-         * @maxLength 20000
-         * @nullable
-         */
-      instructions?: string | null;
-      /**
-         * Whether the agent opens a pull request when it finishes. Null uses the product default.
-         * @nullable
-         */
-      create_pr?: boolean | null;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-       *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode?: PrModeEnum | null;
-      /**
-         * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-         * @minimum 5
-         * @maximum 240
-         * @nullable
-         */
-      max_duration_minutes?: number | null;
-      /**
-         * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-         * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-         */
-      max_cost_usd?: string | null;
-      /**
-         * What this profile is for.
-         * @maxLength 2000
-         */
-      description?: string;
-      /**
-         * Tags added to every run that uses this profile.
-         * @maxItems 20
-         * @items.maxLength 50
-         */
-      tags?: string[];
-      /**
-         * Name of the profile. It is unique in the project, without regard to case.
-         * @maxLength 100
-         */
-      name?: string;
     }
 
     export type PatchedProjectBackwardCompatGroupTypesItem = { [key: string]: unknown };
@@ -86644,93 +86790,6 @@ export namespace Schemas {
       tags: unknown[];
       displayUrl: string | null;
       createdAt: string | null;
-    }
-
-    /**
-     * The run defaults that a profile and the project settings share. A null value sets no default.
-     */
-    export interface ProfileCreate {
-      /**
-         * Default GitHub repository, in the format `owner/name`. Null sets no default.
-         * @maxLength 255
-         * @nullable
-         * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-         */
-      repository?: string | null;
-      /**
-         * Default base branch. Null uses the default branch of the repository.
-         * @maxLength 255
-         * @nullable
-         */
-      branch?: string | null;
-      /**
-         * Default model for the agent. Null lets PostHog select the model.
-         * @maxLength 100
-         * @nullable
-         */
-      model?: string | null;
-      /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
-       *
-       * * `1x2` - 1 vCPU, 2 GiB
-       * * `2x4` - 2 vCPU, 4 GiB
-       * * `2x8` - 2 vCPU, 8 GiB
-       * * `4x8` - 4 vCPU, 8 GiB
-       * * `4x16` - 4 vCPU, 16 GiB
-       * * `8x16` - 8 vCPU, 16 GiB
-       * * `8x32` - 8 vCPU, 32 GiB
-       * * `16x64` - 16 vCPU, 64 GiB */
-      size?: SizeNameEnum | null;
-      /** How the agent pays for model usage. `auto` uses your own subscription when one is connected for the runtime, and PostHog inference otherwise. Null uses the product default.
-       *
-       * * `auto` - Auto
-       * * `own_subscription` - Own Subscription
-       * * `posthog` - PostHog */
-      inference?: InferenceModeEnum | null;
-      /**
-         * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
-         * @maxLength 20000
-         * @nullable
-         */
-      instructions?: string | null;
-      /**
-         * Whether the agent opens a pull request when it finishes. Null uses the product default.
-         * @nullable
-         */
-      create_pr?: boolean | null;
-      /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-       *
-       * * `draft` - Draft
-       * * `ready` - Ready */
-      pr_mode?: PrModeEnum | null;
-      /**
-         * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-         * @minimum 5
-         * @maximum 240
-         * @nullable
-         */
-      max_duration_minutes?: number | null;
-      /**
-         * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-         * @nullable
-         * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-         */
-      max_cost_usd?: string | null;
-      /**
-         * What this profile is for.
-         * @maxLength 2000
-         */
-      description?: string;
-      /**
-         * Tags added to every run that uses this profile.
-         * @maxItems 20
-         * @items.maxLength 50
-         */
-      tags?: string[];
-      /**
-         * Name of the profile. It is unique in the project, without regard to case.
-         * @maxLength 100
-         */
-      name: string;
     }
 
     /**
@@ -117678,7 +117737,7 @@ export namespace Schemas {
       '16x64': '16x64',
     } as const;
 
-    export type CloudAgentsProfilesListParams = {
+    export type CloudAgentsPresetsListParams = {
     /**
      * Number of results to return per page.
      */
@@ -117707,9 +117766,9 @@ export namespace Schemas {
      */
     offset?: number;
     /**
-     * Return only the runs that used this profile.
+     * Return only the runs that used this preset.
      */
-    profile_id?: string;
+    preset_id?: string;
     /**
      * Return runs whose repository contains this text.
      * @minLength 1
@@ -117717,13 +117776,12 @@ export namespace Schemas {
      */
     repository?: string;
     /**
-     * Return only the runs with this status.
+     * Return only the runs with this status. A status filter covers the newest 1,000 runs that are active, for `queued` and `running`, or that have no agent at work, for `idle` and `done`.
      *
      * * `queued` - Queued
      * * `running` - Running
-     * * `completed` - Completed
-     * * `failed` - Failed
-     * * `cancelled` - Cancelled
+     * * `idle` - Idle
+     * * `done` - Done
      * @minLength 1
      */
     status?: CloudAgentsRunsListStatus;
@@ -117741,9 +117799,8 @@ export namespace Schemas {
     export const CloudAgentsRunsListStatus = {
       Queued: 'queued',
       Running: 'running',
-      Completed: 'completed',
-      Failed: 'failed',
-      Cancelled: 'cancelled',
+      Idle: 'idle',
+      Done: 'done',
     } as const;
 
     export type CloudAgentsRunsEventsRetrieveParams = {
@@ -117781,10 +117838,10 @@ export namespace Schemas {
      */
     date_to?: string;
     /**
-     * `day` gives one bucket for each UTC day. `profile` gives one bucket for each profile.
+     * `day` gives one bucket for each UTC day. `preset` gives one bucket for each preset.
      *
      * * `day` - Day
-     * * `profile` - Profile
+     * * `preset` - Preset
      * @minLength 1
      */
     group_by?: CloudAgentsUsageRetrieveGroupBy;
@@ -117795,7 +117852,7 @@ export namespace Schemas {
 
     export const CloudAgentsUsageRetrieveGroupBy = {
       Day: 'day',
-      Profile: 'profile',
+      Preset: 'preset',
     } as const;
 
     export type CohortsListParams = {

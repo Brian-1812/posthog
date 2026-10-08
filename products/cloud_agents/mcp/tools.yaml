@@ -40,8 +40,8 @@ tools:
             uses. Use cloud-agents-catalog to see the sizes.
         feature_flag: cloud-agents
         feature_flag_behavior: enable
-    cloud-agents-profile-create:
-        operation: cloud_agents_profiles_create
+    cloud-agents-preset-create:
+        operation: cloud_agents_presets_create
         enabled: true
         scopes:
             - cloud_agent:write
@@ -56,18 +56,14 @@ tools:
             instructions and tags. A run that names the profile uses these defaults, so later runs need only a prompt.
             Only `name` is required, and the name must be unique in the project. Creating a profile starts no run and
             costs nothing. A value sent on a run overrides the profile value for that run.
-        exclude_params:
-            - pr_mode
-            - max_duration_minutes
-            - max_cost_usd
         feature_flag: cloud-agents
         feature_flag_behavior: enable
-    cloud-agents-profile-delete:
-        operation: cloud_agents_profiles_destroy
+    cloud-agents-preset-delete:
+        operation: cloud_agents_presets_destroy
         enabled: false
         disabled_reason: Deleting a shared profile changes what later runs of other people use, so a person does it.
-    cloud-agents-profile-get:
-        operation: cloud_agents_profiles_retrieve
+    cloud-agents-preset-get:
+        operation: cloud_agents_presets_retrieve
         enabled: true
         scopes:
             - cloud_agent:read
@@ -79,14 +75,14 @@ tools:
         title: Get cloud agent profile
         description: >
             Get one profile by ID, with all the run defaults it sets. A null field sets no default. Use
-            cloud-agents-profile-list to find the ID.
+            cloud-agents-preset-list to find the ID.
         param_overrides:
             id:
                 description: ID of the profile (a UUID). A profile name is not accepted here.
         feature_flag: cloud-agents
         feature_flag_behavior: enable
-    cloud-agents-profile-list:
-        operation: cloud_agents_profiles_list
+    cloud-agents-preset-list:
+        operation: cloud_agents_presets_list
         enabled: true
         scopes:
             - cloud_agent:read
@@ -105,12 +101,9 @@ tools:
         response:
             exclude:
                 - instructions
-                - pr_mode
-                - max_duration_minutes
-                - max_cost_usd
                 - created_by
-    cloud-agents-profile-update:
-        operation: cloud_agents_profiles_partial_update
+    cloud-agents-preset-update:
+        operation: cloud_agents_presets_partial_update
         enabled: false
         disabled_reason: Changing a shared profile changes what later runs of other people use, so a person does it.
     cloud-agents-run-cancel:
@@ -137,9 +130,9 @@ tools:
             include:
                 - id
                 - status
-                - stop_reason
-                - error
-                - completed_at
+                - status_reason
+                - status_detail
+                - ended_at
                 - result
                 - cost
     cloud-agents-run-create:
@@ -163,10 +156,6 @@ tools:
             `failed` or `cancelled`. This tool cannot send an idempotency key, so every call starts a new run. Do not
             call it again after a timeout or an unclear error: first check cloud-agents-run-list for the run. A 429
             error means the project is at its concurrency, rate or usage limit, so wait before you try again.
-        exclude_params:
-            - pr_mode
-            - max_duration_minutes
-            - max_cost_usd
         param_overrides:
             prompt:
                 description: >
@@ -186,9 +175,8 @@ tools:
                 - id
                 - status
                 - created_at
-                - repository
-                - branch
-                - profile
+                - repositories
+                - preset
                 - config.model
                 - config.size
                 - config.inference
@@ -262,14 +250,13 @@ tools:
             include:
                 - id
                 - status
-                - stop_reason
-                - error
+                - status_reason
+                - status_detail
                 - created_at
-                - completed_at
+                - ended_at
                 - prompt
-                - repository
-                - branch
-                - profile
+                - repositories
+                - preset
                 - result.pr_url
                 - cost.total_usd
                 - cost.final
@@ -301,7 +288,7 @@ tools:
                 - resumed
                 - run.id
                 - run.status
-                - run.stop_reason
+                - run.status_reason
                 - run.agent_sessions
     cloud-agents-run-usage:
         operation: cloud_agents_runs_usage_retrieve

@@ -12,7 +12,7 @@ from rest_framework import status
 from posthog.models import Organization, Team
 from posthog.models.scoping import team_scope
 
-from products.cloud_agents.backend.models import CloudAgentProfile, TeamCloudAgentsConfig
+from products.cloud_agents.backend.models import CloudAgentPreset, TeamCloudAgentsConfig
 from products.cloud_agents.backend.tests.base import LOGIC, CloudAgentsFlagMixin, TasksFakeMixin, billing_dto
 from products.tasks.backend.facade.pricing import get_cloud_agents_rate_card
 
@@ -61,7 +61,7 @@ class TestCatalogAndEstimate(TasksFakeMixin, CloudAgentsFlagMixin, APIBaseTest):
         (default_model,) = [model["id"] for model in catalog["models"] if model["is_default"]]
 
         response = self.client.post(
-            f"{self.base_url()}/runs/", data={"prompt": "Fix it", "repository": "acme/app"}, format="json"
+            f"{self.base_url()}/runs/", data={"prompt": "Fix it", "repositories": [{"name": "acme/app"}]}, format="json"
         )
 
         assert response.json()["config"]["model"] == default_model
@@ -87,13 +87,13 @@ class TestUsageSummary(TasksFakeMixin, CloudAgentsFlagMixin, APIBaseTest):
     def setUp(self) -> None:
         super().setUp()
         with team_scope(self.team.id):
-            self.profile = CloudAgentProfile.objects.create(team=self.team, name="Backend")
+            self.preset = CloudAgentPreset.objects.create(team=self.team, name="Backend")
         other_team = Team.objects.create(organization=Organization.objects.create(name="Other"), name="Other team")
         costs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = [
             (
                 NOW - timedelta(days=2),
                 {"compute_cost_cents": 150, "inference_cost_cents": 200},
-                {"profile": self.profile},
+                {"preset": self.preset},
             ),
             # The customer pays the model provider for this run, so its inference cost is not in the totals.
             (
@@ -104,7 +104,7 @@ class TestUsageSummary(TasksFakeMixin, CloudAgentsFlagMixin, APIBaseTest):
             (
                 NOW - timedelta(days=1),
                 {"compute_cost_cents": 100, "inference_cost_cents": 50},
-                {"profile": self.profile},
+                {"preset": self.preset},
             ),
             (NOW - timedelta(days=1), {}, {}),
             (NOW - timedelta(days=40), {"compute_cost_cents": 900}, {}),
@@ -139,14 +139,14 @@ class TestUsageSummary(TasksFakeMixin, CloudAgentsFlagMixin, APIBaseTest):
             ("2026-10-06", 2, "1.5000"),
         ]
 
-    def test_usage_by_profile(self) -> None:
-        body = self.usage("?group_by=profile").json()
+    def test_usage_by_preset(self) -> None:
+        body = self.usage("?group_by=preset").json()
 
-        assert body["group_by"] == "profile"
+        assert body["group_by"] == "preset"
         assert [
             (bucket["key"], bucket["name"], bucket["usage"]["runs"], bucket["usage"]["total_usd"])
             for bucket in body["buckets"]
-        ] == [(str(self.profile.id), "Backend", 2, "5.0000"), (None, None, 2, "0.2500")]
+        ] == [(str(self.preset.id), "Backend", 2, "5.0000"), (None, None, 2, "0.2500")]
 
     def test_usage_in_a_date_range(self) -> None:
         body = self.usage("?date_from=2026-08-01T00:00:00Z&date_to=2026-09-01T00:00:00Z").json()

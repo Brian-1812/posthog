@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from functools import wraps
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 from uuid import UUID
 
 from django.db import transaction
@@ -27,6 +27,7 @@ import structlog
 
 from posthog.dataclasses import frozen
 
+from products.tasks.backend.constants import COMPUTE_WAIVED_REASON_STATE_KEY
 from products.tasks.backend.logic.services.compute_quota import BillingProduct, billing_product
 from products.tasks.backend.logic.services.sandbox import SandboxBase, SandboxConfig, get_sandbox_class_for_sandbox_id
 from products.tasks.backend.logic.services.sandbox_pricing import (
@@ -285,21 +286,24 @@ def record_task_run_user_activity(
     )
 
 
-def waive_run_sandbox_sessions(run_id: str | UUID, team_id: int, reason: str) -> int:
-    """Waive the charge for every sandbox session of a Cloud Agents run. Returns the rows waived.
+def waive_run_sandbox_sessions(run_id: str | UUID, team_id: int, reason: str) -> bool:
+    """Waive the charge for every sandbox session of a Cloud Agents run. Returns whether the run is waived now.
 
-    A run of any other product is left alone. The first waiver of a session wins.
+    The waiver is one marker in the state of the run, so it covers the sessions that the run
+    opens later too. A run of any other product is left alone. The first reason of a run wins.
     """
     run_uuid = run_id if isinstance(run_id, UUID) else UUID(run_id)
-    return (
-        SandboxSession.objects.for_team(team_id)
-        .filter(
-            task_run_id=run_uuid,
-            task_run__task__origin_product=Task.OriginProduct.CLOUD_AGENTS,
-            waived_at__isnull=True,
-        )
-        .update(waived_at=timezone.now(), waived_reason=reason[:WAIVED_REASON_MAX_LENGTH])
-    )
+    is_cloud_agents_run = TaskRun.objects.filter(
+        id=run_uuid, team_id=team_id, task__origin_product=Task.OriginProduct.CLOUD_AGENTS
+    ).exists()
+    if not is_cloud_agents_run:
+        return False
+
+    def _mark(state: dict[str, Any]) -> None:
+        state.setdefault(COMPUTE_WAIVED_REASON_STATE_KEY, reason[:WAIVED_REASON_MAX_LENGTH])
+
+    TaskRun.mutate_state_atomic(run_uuid, _mark)
+    return True
 
 
 @dataclass(frozen=True)
@@ -323,11 +327,13 @@ class SandboxComputeUsageByTeam:
 _BILLED_SESSIONS: dict[BillingProduct, Q] = {
     "posthog_code": Q(client_provenance=TaskClientProvenance.POSTHOG_DESKTOP)
     & (Q(origin_product=Task.OriginProduct.USER_CREATED) | Q(origin_product=Task.OriginProduct.LOOP)),
+    # The waiver is on the run, which the query joins by primary key to load the task. So the
+    # indexes on the session rows still select the scan, and the marker is a filter on the joined row.
     "cloud_agents": Q(
         client_provenance=TaskClientProvenance.CLOUD_AGENTS,
         origin_product=Task.OriginProduct.CLOUD_AGENTS,
-        waived_at__isnull=True,
-    ),
+    )
+    & ~Q(task_run__state__has_key=COMPUTE_WAIVED_REASON_STATE_KEY),
 }
 
 

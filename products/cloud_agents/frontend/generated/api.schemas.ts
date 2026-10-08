@@ -138,40 +138,71 @@ export interface CloudAgentEstimateApi {
     estimate_usd: string
 }
 
-/**
- * * `draft` - Draft
- * * `ready` - Ready
- */
-export type PrModeEnumApi = (typeof PrModeEnumApi)[keyof typeof PrModeEnumApi]
+export interface CloudAgentRepositoryApi {
+    /**
+     * GitHub repository, in the format `owner/name`.
+     * @maxLength 255
+     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+     */
+    name: string
+    /**
+     * Branch that the agent starts from. Null uses the default branch of the repository.
+     * @maxLength 255
+     * @nullable
+     */
+    initial_branch?: string | null
+}
 
-export const PrModeEnumApi = {
-    Draft: 'draft',
-    Ready: 'ready',
+/**
+ * * `low` - Low
+ * * `medium` - Medium
+ * * `high` - High
+ * * `xhigh` - Extra high
+ * * `max` - Max
+ * * `ultracode` - Ultracode
+ */
+export type CloudAgentReasoningEffortEnumApi =
+    (typeof CloudAgentReasoningEffortEnumApi)[keyof typeof CloudAgentReasoningEffortEnumApi]
+
+export const CloudAgentReasoningEffortEnumApi = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Xhigh: 'xhigh',
+    Max: 'max',
+    Ultracode: 'ultracode',
 } as const
 
 /**
- * The run defaults that a profile and the project settings share. A null value sets no default.
+ * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+ * @nullable
  */
-export interface ProfileApi {
+export type CloudAgentPresetApiOutputSchema = { [key: string]: unknown } | null
+
+/**
+ * The run defaults that a preset and the project settings share. A null value sets no default.
+ */
+export interface CloudAgentPresetApi {
     /**
-     * Default GitHub repository, in the format `owner/name`. Null sets no default.
-     * @maxLength 255
-     * @nullable
-     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-     */
-    repository?: string | null
-    /**
-     * Default base branch. Null uses the default branch of the repository.
-     * @maxLength 255
+     * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
      * @nullable
      */
-    branch?: string | null
+    repositories?: CloudAgentRepositoryApi[] | null
     /**
      * Default model for the agent. Null lets PostHog select the model.
      * @maxLength 100
      * @nullable
      */
     model?: string | null
+    /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort?: CloudAgentReasoningEffortEnumApi | null
     /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
      *
      * * `1x2` - 1 vCPU, 2 GiB
@@ -190,7 +221,7 @@ export interface ProfileApi {
      * * `posthog` - PostHog */
     inference?: InferenceModeEnumApi | null
     /**
-     * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+     * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
      * @maxLength 20000
      * @nullable
      */
@@ -200,79 +231,80 @@ export interface ProfileApi {
      * @nullable
      */
     create_pr?: boolean | null
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode?: PrModeEnumApi | null
     /**
-     * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-     * @minimum 5
-     * @maximum 240
+     * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+     * @minimum 1
+     * @maximum 120
      * @nullable
      */
-    max_duration_minutes?: number | null
+    idle_minutes?: number | null
     /**
-     * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
      * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
      */
-    max_cost_usd?: string | null
-    /** ID of the profile. */
+    output_schema?: CloudAgentPresetApiOutputSchema
+    /** ID of the preset. */
     id: string
-    /** Name of the profile. */
+    /** Name of the preset. */
     name: string
-    /** What this profile is for. */
+    /** What this preset is for. */
     description: string
     /**
-     * Tags added to every run that uses this profile.
+     * Tags added to every run that uses this preset.
      * @maxItems 20
      * @items.maxLength 50
      */
     tags: string[]
     /**
-     * ID of the user who created the profile.
+     * ID of the user who created the preset.
      * @nullable
      */
     created_by: number | null
-    /** When the profile was created. */
+    /** When the preset was created. */
     created_at: string
-    /** When the profile was last changed. */
+    /** When the preset was last changed. */
     updated_at: string
 }
 
-export interface PaginatedProfileListApi {
+export interface PaginatedCloudAgentPresetListApi {
     count: number
     /** @nullable */
     next?: string | null
     /** @nullable */
     previous?: string | null
-    results: ProfileApi[]
+    results: CloudAgentPresetApi[]
 }
 
 /**
- * The run defaults that a profile and the project settings share. A null value sets no default.
+ * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+ * @nullable
  */
-export interface ProfileCreateApi {
+export type CloudAgentPresetCreateApiOutputSchema = { [key: string]: unknown } | null
+
+/**
+ * The run defaults that a preset and the project settings share. A null value sets no default.
+ */
+export interface CloudAgentPresetCreateApi {
     /**
-     * Default GitHub repository, in the format `owner/name`. Null sets no default.
-     * @maxLength 255
-     * @nullable
-     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-     */
-    repository?: string | null
-    /**
-     * Default base branch. Null uses the default branch of the repository.
-     * @maxLength 255
+     * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
      * @nullable
      */
-    branch?: string | null
+    repositories?: CloudAgentRepositoryApi[] | null
     /**
      * Default model for the agent. Null lets PostHog select the model.
      * @maxLength 100
      * @nullable
      */
     model?: string | null
+    /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort?: CloudAgentReasoningEffortEnumApi | null
     /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
      *
      * * `1x2` - 1 vCPU, 2 GiB
@@ -291,7 +323,7 @@ export interface ProfileCreateApi {
      * * `posthog` - PostHog */
     inference?: InferenceModeEnumApi | null
     /**
-     * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+     * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
      * @maxLength 20000
      * @nullable
      */
@@ -301,65 +333,66 @@ export interface ProfileCreateApi {
      * @nullable
      */
     create_pr?: boolean | null
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode?: PrModeEnumApi | null
     /**
-     * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-     * @minimum 5
-     * @maximum 240
+     * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+     * @minimum 1
+     * @maximum 120
      * @nullable
      */
-    max_duration_minutes?: number | null
+    idle_minutes?: number | null
     /**
-     * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
      * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
      */
-    max_cost_usd?: string | null
+    output_schema?: CloudAgentPresetCreateApiOutputSchema
     /**
-     * What this profile is for.
+     * What this preset is for.
      * @maxLength 2000
      */
     description?: string
     /**
-     * Tags added to every run that uses this profile.
+     * Tags added to every run that uses this preset.
      * @maxItems 20
      * @items.maxLength 50
      */
     tags?: string[]
     /**
-     * Name of the profile. It is unique in the project, without regard to case.
+     * Name of the preset. It is unique in the project, without regard to case.
      * @maxLength 100
      */
     name: string
 }
 
 /**
- * The run defaults that a profile and the project settings share. A null value sets no default.
+ * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+ * @nullable
  */
-export interface PatchedProfileUpdateApi {
+export type PatchedCloudAgentPresetUpdateApiOutputSchema = { [key: string]: unknown } | null
+
+/**
+ * The run defaults that a preset and the project settings share. A null value sets no default.
+ */
+export interface PatchedCloudAgentPresetUpdateApi {
     /**
-     * Default GitHub repository, in the format `owner/name`. Null sets no default.
-     * @maxLength 255
-     * @nullable
-     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-     */
-    repository?: string | null
-    /**
-     * Default base branch. Null uses the default branch of the repository.
-     * @maxLength 255
+     * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
      * @nullable
      */
-    branch?: string | null
+    repositories?: CloudAgentRepositoryApi[] | null
     /**
      * Default model for the agent. Null lets PostHog select the model.
      * @maxLength 100
      * @nullable
      */
     model?: string | null
+    /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort?: CloudAgentReasoningEffortEnumApi | null
     /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
      *
      * * `1x2` - 1 vCPU, 2 GiB
@@ -378,7 +411,7 @@ export interface PatchedProfileUpdateApi {
      * * `posthog` - PostHog */
     inference?: InferenceModeEnumApi | null
     /**
-     * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+     * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
      * @maxLength 20000
      * @nullable
      */
@@ -388,37 +421,31 @@ export interface PatchedProfileUpdateApi {
      * @nullable
      */
     create_pr?: boolean | null
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode?: PrModeEnumApi | null
     /**
-     * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-     * @minimum 5
-     * @maximum 240
+     * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+     * @minimum 1
+     * @maximum 120
      * @nullable
      */
-    max_duration_minutes?: number | null
+    idle_minutes?: number | null
     /**
-     * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
      * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
      */
-    max_cost_usd?: string | null
+    output_schema?: PatchedCloudAgentPresetUpdateApiOutputSchema
     /**
-     * What this profile is for.
+     * What this preset is for.
      * @maxLength 2000
      */
     description?: string
     /**
-     * Tags added to every run that uses this profile.
+     * Tags added to every run that uses this preset.
      * @maxItems 20
      * @items.maxLength 50
      */
     tags?: string[]
     /**
-     * Name of the profile. It is unique in the project, without regard to case.
+     * Name of the preset. It is unique in the project, without regard to case.
      * @maxLength 100
      */
     name?: string
@@ -427,45 +454,54 @@ export interface PatchedProfileUpdateApi {
 /**
  * * `queued` - Queued
  * * `running` - Running
- * * `completed` - Completed
- * * `failed` - Failed
- * * `cancelled` - Cancelled
+ * * `idle` - Idle
+ * * `done` - Done
  */
 export type CloudAgentRunStatusEnumApi = (typeof CloudAgentRunStatusEnumApi)[keyof typeof CloudAgentRunStatusEnumApi]
 
 export const CloudAgentRunStatusEnumApi = {
     Queued: 'queued',
     Running: 'running',
-    Completed: 'completed',
-    Failed: 'failed',
-    Cancelled: 'cancelled',
+    Idle: 'idle',
+    Done: 'done',
 } as const
 
 /**
- * * `done` - Done
+ * * `turn_closed` - Turn Closed
+ * * `provision_failed` - Provision Failed
+ * * `unexpected_failure` - Unexpected Failure
+ * * `timed_out` - Timed Out
+ * * `credit_spent` - Credit Spent
+ * * `finished` - Finished
+ * * `closed` - Closed
  * * `cancelled` - Cancelled
- * * `error` - Error
- * * `timeout` - Timeout
- * * `budget_exceeded` - Budget Exceeded
- * * `usage_limit` - Usage Limit
  */
-export type StopReasonEnumApi = (typeof StopReasonEnumApi)[keyof typeof StopReasonEnumApi]
+export type CloudAgentRunStatusReasonEnumApi =
+    (typeof CloudAgentRunStatusReasonEnumApi)[keyof typeof CloudAgentRunStatusReasonEnumApi]
 
-export const StopReasonEnumApi = {
-    Done: 'done',
+export const CloudAgentRunStatusReasonEnumApi = {
+    TurnClosed: 'turn_closed',
+    ProvisionFailed: 'provision_failed',
+    UnexpectedFailure: 'unexpected_failure',
+    TimedOut: 'timed_out',
+    CreditSpent: 'credit_spent',
+    Finished: 'finished',
+    Closed: 'closed',
     Cancelled: 'cancelled',
-    Error: 'error',
-    Timeout: 'timeout',
-    BudgetExceeded: 'budget_exceeded',
-    UsageLimit: 'usage_limit',
 } as const
 
-export interface CloudAgentRunProfileRefApi {
-    /** ID of the profile. */
+export interface CloudAgentRunPresetRefApi {
+    /** ID of the preset. */
     id: string
-    /** Name of the profile. */
+    /** Name of the preset. */
     name: string
 }
+
+/**
+ * The JSON Schema that the result of the agent must match. Null when the run has none.
+ * @nullable
+ */
+export type CloudAgentRunConfigApiOutputSchema = { [key: string]: unknown } | null
 
 /**
  * Reads a run: the stored configuration is in `config`, and the priced size is on the run.
@@ -476,6 +512,15 @@ export interface CloudAgentRunConfigApi {
      * @nullable
      */
     model: string | null
+    /** How much the model reasons before it answers. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort: CloudAgentReasoningEffortEnumApi | null
     /** Sandbox size of the run. It is fixed for the life of the run. */
     size: CloudAgentSizeApi
     /** How the run pays for model usage: `posthog` for PostHog inference, `own_subscription` for the subscription of the user.
@@ -486,22 +531,22 @@ export interface CloudAgentRunConfigApi {
     inference: InferenceModeEnumApi
     /** Whether the agent opens a pull request when it finishes. */
     create_pr: boolean
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode: PrModeEnumApi
-    /** Time limit of the run in minutes. */
-    max_duration_minutes: number
+    /** How many minutes the sandbox waits with no activity before it stops. */
+    idle_minutes: number
     /**
-     * Cost limit of the run in US dollars. Reserved. Not enforced yet.
+     * The JSON Schema that the result of the agent must match. Null when the run has none.
      * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
      */
-    max_cost_usd: string | null
-    /** Whether the agent got instructions from the run, its profile or the project settings. */
+    output_schema: CloudAgentRunConfigApiOutputSchema
+    /** Whether the agent got instructions from the run, its preset or the project settings. */
     readonly instructions_applied: boolean
 }
+
+/**
+ * The JSON result that the agent returned for the `output_schema` of the run. Null when the run has no schema, or when the agent returned no result yet.
+ * @nullable
+ */
+export type CloudAgentRunResultApiOutput = { [key: string]: unknown } | null
 
 export interface CloudAgentRunResultApi {
     /**
@@ -516,6 +561,11 @@ export interface CloudAgentRunResultApi {
      * @nullable
      */
     summary: string | null
+    /**
+     * The JSON result that the agent returned for the `output_schema` of the run. Null when the run has no schema, or when the agent returned no result yet.
+     * @nullable
+     */
+    output: CloudAgentRunResultApiOutput
 }
 
 /**
@@ -585,17 +635,29 @@ export interface CloudAgentRunCostApi {
     final: boolean
 }
 
+/**
+ * * `queued` - Queued
+ * * `running` - Running
+ * * `ended` - Ended
+ */
+export type CloudAgentSessionStatusEnumApi =
+    (typeof CloudAgentSessionStatusEnumApi)[keyof typeof CloudAgentSessionStatusEnumApi]
+
+export const CloudAgentSessionStatusEnumApi = {
+    Queued: 'queued',
+    Running: 'running',
+    Ended: 'ended',
+} as const
+
 export interface CloudAgentAgentSessionApi {
     /** Position of the session in the run, from 1. */
     index: number
-    /** Status of the session.
+    /** `queued` waits for a sandbox, `running` has an agent at work, and `ended` has no sandbox.
      *
      * * `queued` - Queued
      * * `running` - Running
-     * * `completed` - Completed
-     * * `failed` - Failed
-     * * `cancelled` - Cancelled */
-    status: CloudAgentRunStatusEnumApi
+     * * `ended` - Ended */
+    status: CloudAgentSessionStatusEnumApi
     /**
      * When the agent started work in this session.
      * @nullable
@@ -639,28 +701,29 @@ export type CloudAgentRunApiMetadata = { [key: string]: string }
 export interface CloudAgentRunApi {
     /** ID of the run. */
     id: string
-    /** `queued` waits for a sandbox, `running` has an agent at work, and `completed`, `failed` and `cancelled` are final until you send a new message.
+    /** `queued` waits for a sandbox. `running` has an agent at work. `idle` has no sandbox, and a message continues the run. `done` is final, and a message is refused.
      *
      * * `queued` - Queued
      * * `running` - Running
-     * * `completed` - Completed
-     * * `failed` - Failed
-     * * `cancelled` - Cancelled */
+     * * `idle` - Idle
+     * * `done` - Done */
     status: CloudAgentRunStatusEnumApi
-    /** Why the run stopped. Null while the run is active.
+    /** Why the run is `idle` or `done`. Null while the run is `queued` or `running`. An `idle` run has `turn_closed` when the agent finished its turn, `timed_out`, `credit_spent`, `provision_failed` or `unexpected_failure`. A `done` run has `finished` when its pull request was merged, `closed` when every pull request was closed and not merged, or `cancelled`.
      *
-     * * `done` - Done
-     * * `cancelled` - Cancelled
-     * * `error` - Error
-     * * `timeout` - Timeout
-     * * `budget_exceeded` - Budget Exceeded
-     * * `usage_limit` - Usage Limit */
-    stop_reason: StopReasonEnumApi | null
+     * * `turn_closed` - Turn Closed
+     * * `provision_failed` - Provision Failed
+     * * `unexpected_failure` - Unexpected Failure
+     * * `timed_out` - Timed Out
+     * * `credit_spent` - Credit Spent
+     * * `finished` - Finished
+     * * `closed` - Closed
+     * * `cancelled` - Cancelled */
+    status_reason: CloudAgentRunStatusReasonEnumApi | null
     /**
-     * What went wrong and what to do next. Null when the run has no error.
+     * What the status reason means for you and what to do next. Null when there is nothing to add.
      * @nullable
      */
-    error: string | null
+    status_detail: string | null
     /** When the run was created. */
     created_at: string
     /**
@@ -669,33 +732,28 @@ export interface CloudAgentRunApi {
      */
     started_at: string | null
     /**
-     * When the run stopped.
+     * When the last agent session ended. Null while the run is `queued` or `running`.
      * @nullable
      */
-    completed_at: string | null
+    ended_at: string | null
     /** When the run last changed. */
     updated_at: string
     /** The task that the run started with. */
     prompt: string
-    /** GitHub repository of the run, in the format `owner/name`. */
-    repository: string
-    /**
-     * Base branch of the run. Null uses the default branch of the repository.
-     * @nullable
-     */
-    branch: string | null
-    /** The profile that the run used. Null when it used none. */
-    readonly profile: CloudAgentRunProfileRefApi | null
+    /** The repositories that the agent works in. */
+    repositories: CloudAgentRepositoryApi[]
+    /** The preset that the run used. Null when it used none. */
+    readonly preset: CloudAgentRunPresetRefApi | null
     /** The configuration that the run uses. */
     config: CloudAgentRunConfigApi
     /** What the agent produced. */
     result: CloudAgentRunResultApi
     /** What the run cost. */
     cost: CloudAgentRunCostApi
-    /** The agent sessions of the run, oldest first. A message to a run that stopped starts a new session. */
+    /** The agent sessions of the run, oldest first. A message to an `idle` run starts a new session. */
     agent_sessions: CloudAgentAgentSessionApi[]
     /**
-     * Tags of the run, including the tags of its profile.
+     * Tags of the run, including the tags of its preset.
      * @maxItems 20
      * @items.maxLength 50
      */
@@ -722,33 +780,40 @@ export interface PaginatedCloudAgentRunListApi {
 }
 
 /**
+ * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+ * @nullable
+ */
+export type CloudAgentRunCreateApiOutputSchema = { [key: string]: unknown } | null
+
+/**
  * Your own key and value pairs, stored with the run and returned with it. At most 16 pairs. Keys and values are strings.
  */
 export type CloudAgentRunCreateApiMetadata = { [key: string]: string }
 
 /**
- * The run defaults that a profile and the project settings share. A null value sets no default.
+ * The run defaults that a preset and the project settings share. A null value sets no default.
  */
 export interface CloudAgentRunCreateApi {
     /**
-     * GitHub repository that the agent works in, in the format `owner/name`. Required unless the profile or the project settings set a default.
-     * @maxLength 255
-     * @nullable
-     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-     */
-    repository?: string | null
-    /**
-     * Default base branch. Null uses the default branch of the repository.
-     * @maxLength 255
+     * The repositories that the agent works in. Only one repository is supported for now. Required unless the preset or the project settings set a default.
      * @nullable
      */
-    branch?: string | null
+    repositories?: CloudAgentRepositoryApi[] | null
     /**
      * Default model for the agent. Null lets PostHog select the model.
      * @maxLength 100
      * @nullable
      */
     model?: string | null
+    /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort?: CloudAgentReasoningEffortEnumApi | null
     /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
      *
      * * `1x2` - 1 vCPU, 2 GiB
@@ -767,7 +832,7 @@ export interface CloudAgentRunCreateApi {
      * * `posthog` - PostHog */
     inference?: InferenceModeEnumApi | null
     /**
-     * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+     * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
      * @maxLength 20000
      * @nullable
      */
@@ -777,37 +842,31 @@ export interface CloudAgentRunCreateApi {
      * @nullable
      */
     create_pr?: boolean | null
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode?: PrModeEnumApi | null
     /**
-     * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-     * @minimum 5
-     * @maximum 240
+     * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+     * @minimum 1
+     * @maximum 120
      * @nullable
      */
-    max_duration_minutes?: number | null
+    idle_minutes?: number | null
     /**
-     * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
      * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
      */
-    max_cost_usd?: string | null
+    output_schema?: CloudAgentRunCreateApiOutputSchema
     /**
      * The task for the agent, in plain language.
      * @maxLength 64000
      */
     prompt: string
     /**
-     * ID or name of the profile whose defaults the run uses. Null uses the default profile of the project, when one is set.
+     * ID or name of the preset whose defaults the run uses. Null uses the default preset of the project, when one is set.
      * @maxLength 100
      * @nullable
      */
-    profile?: string | null
+    preset?: string | null
     /**
-     * Tags for the run. The tags of the profile are added to them.
+     * Tags for the run. The tags of the preset are added to them.
      * @maxItems 20
      * @items.maxLength 50
      */
@@ -834,7 +893,7 @@ export interface CloudAgentRunMessageApi {
 }
 
 export interface CloudAgentRunMessageResponseApi {
-    /** True when the message started a new agent session, because the run had stopped. False when the running agent got the message. */
+    /** True when the message started a new agent session, because the run was `idle`. False when the running agent got the message. */
     resumed: boolean
     /** The run after the message. */
     run: CloudAgentRunApi
@@ -879,28 +938,35 @@ export interface CloudAgentRunUsageApi {
 }
 
 /**
- * The run defaults that a profile and the project settings share. A null value sets no default.
+ * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+ * @nullable
+ */
+export type CloudAgentSettingsApiOutputSchema = { [key: string]: unknown } | null
+
+/**
+ * The run defaults that a preset and the project settings share. A null value sets no default.
  */
 export interface CloudAgentSettingsApi {
     /**
-     * Default GitHub repository, in the format `owner/name`. Null sets no default.
-     * @maxLength 255
-     * @nullable
-     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-     */
-    repository?: string | null
-    /**
-     * Default base branch. Null uses the default branch of the repository.
-     * @maxLength 255
+     * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
      * @nullable
      */
-    branch?: string | null
+    repositories?: CloudAgentRepositoryApi[] | null
     /**
      * Default model for the agent. Null lets PostHog select the model.
      * @maxLength 100
      * @nullable
      */
     model?: string | null
+    /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort?: CloudAgentReasoningEffortEnumApi | null
     /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
      *
      * * `1x2` - 1 vCPU, 2 GiB
@@ -919,7 +985,7 @@ export interface CloudAgentSettingsApi {
      * * `posthog` - PostHog */
     inference?: InferenceModeEnumApi | null
     /**
-     * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+     * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
      * @maxLength 20000
      * @nullable
      */
@@ -929,29 +995,23 @@ export interface CloudAgentSettingsApi {
      * @nullable
      */
     create_pr?: boolean | null
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode?: PrModeEnumApi | null
     /**
-     * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-     * @minimum 5
-     * @maximum 240
+     * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+     * @minimum 1
+     * @maximum 120
      * @nullable
      */
-    max_duration_minutes?: number | null
+    idle_minutes?: number | null
     /**
-     * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-     * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-     */
-    max_cost_usd?: string | null
-    /**
-     * ID of the profile that a run uses when it names no profile.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
      * @nullable
      */
-    default_profile: string | null
+    output_schema?: CloudAgentSettingsApiOutputSchema
+    /**
+     * ID of the preset that a run uses when it names no preset.
+     * @nullable
+     */
+    default_preset: string | null
     /** How many runs the project can have active at the same time. */
     max_concurrent_runs: number
     /** How many runs the project can start in one hour. */
@@ -964,28 +1024,35 @@ export interface CloudAgentSettingsApi {
 }
 
 /**
- * The run defaults that a profile and the project settings share. A null value sets no default.
+ * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
+ * @nullable
+ */
+export type PatchedCloudAgentSettingsUpdateApiOutputSchema = { [key: string]: unknown } | null
+
+/**
+ * The run defaults that a preset and the project settings share. A null value sets no default.
  */
 export interface PatchedCloudAgentSettingsUpdateApi {
     /**
-     * Default GitHub repository, in the format `owner/name`. Null sets no default.
-     * @maxLength 255
-     * @nullable
-     * @pattern ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-     */
-    repository?: string | null
-    /**
-     * Default base branch. Null uses the default branch of the repository.
-     * @maxLength 255
+     * Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.
      * @nullable
      */
-    branch?: string | null
+    repositories?: CloudAgentRepositoryApi[] | null
     /**
      * Default model for the agent. Null lets PostHog select the model.
      * @maxLength 100
      * @nullable
      */
     model?: string | null
+    /** How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.
+     *
+     * * `low` - Low
+     * * `medium` - Medium
+     * * `high` - High
+     * * `xhigh` - Extra high
+     * * `max` - Max
+     * * `ultracode` - Ultracode */
+    reasoning_effort?: CloudAgentReasoningEffortEnumApi | null
     /** Default sandbox size, as `<vCPU>x<memory in GiB>`. Null uses the product default.
      *
      * * `1x2` - 1 vCPU, 2 GiB
@@ -1004,7 +1071,7 @@ export interface PatchedCloudAgentSettingsUpdateApi {
      * * `posthog` - PostHog */
     inference?: InferenceModeEnumApi | null
     /**
-     * Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.
+     * Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.
      * @maxLength 20000
      * @nullable
      */
@@ -1014,40 +1081,34 @@ export interface PatchedCloudAgentSettingsUpdateApi {
      * @nullable
      */
     create_pr?: boolean | null
-    /** Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.
-     *
-     * * `draft` - Draft
-     * * `ready` - Ready */
-    pr_mode?: PrModeEnumApi | null
     /**
-     * The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.
-     * @minimum 5
-     * @maximum 240
+     * How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.
+     * @minimum 1
+     * @maximum 120
      * @nullable
      */
-    max_duration_minutes?: number | null
+    idle_minutes?: number | null
     /**
-     * Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.
-     * @nullable
-     * @pattern ^-?\d{0,8}(?:\.\d{0,2})?$
-     */
-    max_cost_usd?: string | null
-    /**
-     * ID of the profile that a run uses when it names no profile. Null sets no default profile.
+     * A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.
      * @nullable
      */
-    default_profile?: string | null
+    output_schema?: PatchedCloudAgentSettingsUpdateApiOutputSchema
+    /**
+     * ID of the preset that a run uses when it names no preset. Null sets no default preset.
+     * @nullable
+     */
+    default_preset?: string | null
 }
 
 /**
  * * `day` - Day
- * * `profile` - Profile
+ * * `preset` - Preset
  */
 export type UsageGroupByEnumApi = (typeof UsageGroupByEnumApi)[keyof typeof UsageGroupByEnumApi]
 
 export const UsageGroupByEnumApi = {
     Day: 'day',
-    Profile: 'profile',
+    Preset: 'preset',
 } as const
 
 export interface CloudAgentUsageTotalsApi {
@@ -1082,12 +1143,12 @@ export interface CloudAgentUsageTotalsApi {
 
 export interface CloudAgentUsageBucketApi {
     /**
-     * The UTC date of the bucket for `group_by=day`. The profile ID for `group_by=profile`, or null for the runs that used no profile.
+     * The UTC date of the bucket for `group_by=day`. The preset ID for `group_by=preset`, or null for the runs that used no preset.
      * @nullable
      */
     key: string | null
     /**
-     * Name of the profile for `group_by=profile`. Null for other buckets.
+     * Name of the preset for `group_by=preset`. Null for other buckets.
      * @nullable
      */
     name: string | null
@@ -1103,11 +1164,11 @@ export interface CloudAgentUsageSummaryApi {
     /** How the buckets are grouped.
      *
      * * `day` - Day
-     * * `profile` - Profile */
+     * * `preset` - Preset */
     group_by: UsageGroupByEnumApi
     /** Usage of all runs created in the range. */
     totals: CloudAgentUsageTotalsApi
-    /** Usage for each day or for each profile. */
+    /** Usage for each day or for each preset. */
     buckets: CloudAgentUsageBucketApi[]
 }
 
@@ -1148,7 +1209,7 @@ export const CloudAgentsEstimateRetrieveSize = {
     '16x64': '16x64',
 } as const
 
-export type CloudAgentsProfilesListParams = {
+export type CloudAgentsPresetsListParams = {
     /**
      * Number of results to return per page.
      */
@@ -1177,9 +1238,9 @@ export type CloudAgentsRunsListParams = {
      */
     offset?: number
     /**
-     * Return only the runs that used this profile.
+     * Return only the runs that used this preset.
      */
-    profile_id?: string
+    preset_id?: string
     /**
      * Return runs whose repository contains this text.
      * @minLength 1
@@ -1187,13 +1248,12 @@ export type CloudAgentsRunsListParams = {
      */
     repository?: string
     /**
-     * Return only the runs with this status.
+     * Return only the runs with this status. A status filter covers the newest 1,000 runs that are active, for `queued` and `running`, or that have no agent at work, for `idle` and `done`.
      *
      * * `queued` - Queued
      * * `running` - Running
-     * * `completed` - Completed
-     * * `failed` - Failed
-     * * `cancelled` - Cancelled
+     * * `idle` - Idle
+     * * `done` - Done
      * @minLength 1
      */
     status?: CloudAgentsRunsListStatus
@@ -1210,9 +1270,8 @@ export type CloudAgentsRunsListStatus = (typeof CloudAgentsRunsListStatus)[keyof
 export const CloudAgentsRunsListStatus = {
     Queued: 'queued',
     Running: 'running',
-    Completed: 'completed',
-    Failed: 'failed',
-    Cancelled: 'cancelled',
+    Idle: 'idle',
+    Done: 'done',
 } as const
 
 export type CloudAgentsRunsEventsRetrieveParams = {
@@ -1250,10 +1309,10 @@ export type CloudAgentsUsageRetrieveParams = {
      */
     date_to?: string
     /**
-     * `day` gives one bucket for each UTC day. `profile` gives one bucket for each profile.
+     * `day` gives one bucket for each UTC day. `preset` gives one bucket for each preset.
      *
      * * `day` - Day
-     * * `profile` - Profile
+     * * `preset` - Preset
      * @minLength 1
      */
     group_by?: CloudAgentsUsageRetrieveGroupBy
@@ -1264,5 +1323,5 @@ export type CloudAgentsUsageRetrieveGroupBy =
 
 export const CloudAgentsUsageRetrieveGroupBy = {
     Day: 'day',
-    Profile: 'profile',
+    Preset: 'preset',
 } as const

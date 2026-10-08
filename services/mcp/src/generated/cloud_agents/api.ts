@@ -49,9 +49,9 @@ export const CloudAgentsEstimateRetrieveQueryParams = () => zod.object({
 
 /**
  * Base for every cloud_agents viewset: the scope object, the feature flag, and the error mapping.
- * @summary List profiles
+ * @summary List presets
  */
-export const CloudAgentsProfilesListParams = () => zod.object({
+export const CloudAgentsPresetsListParams = () => zod.object({
     project_id: zod
         .string()
         .describe(
@@ -59,16 +59,16 @@ export const CloudAgentsProfilesListParams = () => zod.object({
         ),
 })
 
-export const CloudAgentsProfilesListQueryParams = () => zod.object({
+export const CloudAgentsPresetsListQueryParams = () => zod.object({
     limit: zod.number().optional().describe('Number of results to return per page.'),
     offset: zod.number().optional().describe('The initial index from which to return the results.'),
 })
 
 /**
- * A profile is a named set of run defaults. A run names a profile to use its defaults.
- * @summary Create a profile
+ * A preset is a named set of run defaults. A run that names a preset needs only a prompt.
+ * @summary Create a preset
  */
-export const CloudAgentsProfilesCreateParams = () => zod.object({
+export const CloudAgentsPresetsCreateParams = () => zod.object({
     project_id: zod
         .string()
         .describe(
@@ -76,41 +76,64 @@ export const CloudAgentsProfilesCreateParams = () => zod.object({
         ),
 })
 
-export const cloudAgentsProfilesCreateBodyRepositoryMax = 255
+export const cloudAgentsPresetsCreateBodyRepositoriesItemNameMax = 255
 
-export const cloudAgentsProfilesCreateBodyRepositoryRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
-export const cloudAgentsProfilesCreateBodyBranchMax = 255
+export const cloudAgentsPresetsCreateBodyRepositoriesItemNameRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
+export const cloudAgentsPresetsCreateBodyRepositoriesItemInitialBranchMax = 255
 
-export const cloudAgentsProfilesCreateBodyModelMax = 100
+export const cloudAgentsPresetsCreateBodyModelMax = 100
 
-export const cloudAgentsProfilesCreateBodyInstructionsMax = 20000
+export const cloudAgentsPresetsCreateBodyInstructionsMax = 20000
 
-export const cloudAgentsProfilesCreateBodyDescriptionMax = 2000
+export const cloudAgentsPresetsCreateBodyIdleMinutesMax = 120
 
-export const cloudAgentsProfilesCreateBodyTagsItemMax = 50
+export const cloudAgentsPresetsCreateBodyDescriptionMax = 2000
 
-export const cloudAgentsProfilesCreateBodyTagsMax = 20
+export const cloudAgentsPresetsCreateBodyTagsItemMax = 50
 
-export const cloudAgentsProfilesCreateBodyNameMax = 100
+export const cloudAgentsPresetsCreateBodyTagsMax = 20
 
-export const CloudAgentsProfilesCreateBody = () => zod
+export const cloudAgentsPresetsCreateBodyNameMax = 100
+
+export const CloudAgentsPresetsCreateBody = () => zod
     .object({
-        repository: zod
-            .string()
-            .max(cloudAgentsProfilesCreateBodyRepositoryMax)
-            .regex(cloudAgentsProfilesCreateBodyRepositoryRegExp)
+        repositories: zod
+            .array(
+                zod.object({
+                    name: zod
+                        .string()
+                        .max(cloudAgentsPresetsCreateBodyRepositoriesItemNameMax)
+                        .regex(cloudAgentsPresetsCreateBodyRepositoriesItemNameRegExp)
+                        .describe('GitHub repository, in the format `owner\/name`.'),
+                    initial_branch: zod
+                        .string()
+                        .max(cloudAgentsPresetsCreateBodyRepositoriesItemInitialBranchMax)
+                        .nullish()
+                        .describe('Branch that the agent starts from. Null uses the default branch of the repository.'),
+                })
+            )
             .nullish()
-            .describe('Default GitHub repository, in the format `owner\/name`. Null sets no default.'),
-        branch: zod
-            .string()
-            .max(cloudAgentsProfilesCreateBodyBranchMax)
-            .nullish()
-            .describe('Default base branch. Null uses the default branch of the repository.'),
+            .describe(
+                'Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.'
+            ),
         model: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyModelMax)
+            .max(cloudAgentsPresetsCreateBodyModelMax)
             .nullish()
             .describe('Default model for the agent. Null lets PostHog select the model.'),
+        reasoning_effort: zod
+            .union([
+                zod
+                    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
+                    .describe(
+                        '\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+                    ),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.\n\n\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+            ),
         size: zod
             .union([
                 zod
@@ -137,37 +160,51 @@ export const CloudAgentsProfilesCreateBody = () => zod
             ),
         instructions: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyInstructionsMax)
+            .max(cloudAgentsPresetsCreateBodyInstructionsMax)
             .nullish()
             .describe(
-                'Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.'
+                'Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.'
             ),
         create_pr: zod
             .boolean()
             .nullish()
             .describe('Whether the agent opens a pull request when it finishes. Null uses the product default.'),
+        idle_minutes: zod
+            .number()
+            .min(1)
+            .max(cloudAgentsPresetsCreateBodyIdleMinutesMax)
+            .nullish()
+            .describe(
+                'How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.'
+            ),
+        output_schema: zod
+            .record(zod.string(), zod.unknown())
+            .nullish()
+            .describe(
+                'A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.'
+            ),
         description: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyDescriptionMax)
+            .max(cloudAgentsPresetsCreateBodyDescriptionMax)
             .optional()
-            .describe('What this profile is for.'),
+            .describe('What this preset is for.'),
         tags: zod
-            .array(zod.string().max(cloudAgentsProfilesCreateBodyTagsItemMax))
-            .max(cloudAgentsProfilesCreateBodyTagsMax)
+            .array(zod.string().max(cloudAgentsPresetsCreateBodyTagsItemMax))
+            .max(cloudAgentsPresetsCreateBodyTagsMax)
             .optional()
-            .describe('Tags added to every run that uses this profile.'),
+            .describe('Tags added to every run that uses this preset.'),
         name: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyNameMax)
-            .describe('Name of the profile. It is unique in the project, without regard to case.'),
+            .max(cloudAgentsPresetsCreateBodyNameMax)
+            .describe('Name of the preset. It is unique in the project, without regard to case.'),
     })
-    .describe('The run defaults that a profile and the project settings share. A null value sets no default.')
+    .describe('The run defaults that a preset and the project settings share. A null value sets no default.')
 
 /**
  * Base for every cloud_agents viewset: the scope object, the feature flag, and the error mapping.
- * @summary Retrieve a profile
+ * @summary Retrieve a preset
  */
-export const CloudAgentsProfilesRetrieveParams = () => zod.object({
+export const CloudAgentsPresetsRetrieveParams = () => zod.object({
     id: zod.string(),
     project_id: zod
         .string()
@@ -203,7 +240,7 @@ export const CloudAgentsRunsListQueryParams = () => zod.object({
         .describe('Return only the runs created before this time, in ISO 8601 format.'),
     limit: zod.number().optional().describe('Number of results to return per page.'),
     offset: zod.number().optional().describe('The initial index from which to return the results.'),
-    profile_id: zod.string().optional().describe('Return only the runs that used this profile.'),
+    preset_id: zod.string().optional().describe('Return only the runs that used this preset.'),
     repository: zod
         .string()
         .min(1)
@@ -211,10 +248,10 @@ export const CloudAgentsRunsListQueryParams = () => zod.object({
         .optional()
         .describe('Return runs whose repository contains this text.'),
     status: zod
-        .enum(['queued', 'running', 'completed', 'failed', 'cancelled'])
+        .enum(['queued', 'running', 'idle', 'done'])
         .optional()
         .describe(
-            'Return only the runs with this status.\n\n\* `queued` - Queued\n\* `running` - Running\n\* `completed` - Completed\n\* `failed` - Failed\n\* `cancelled` - Cancelled'
+            'Return only the runs with this status. A status filter covers the newest 1,000 runs that are active, for `queued` and `running`, or that have no agent at work, for `idle` and `done`.\n\n\* `queued` - Queued\n\* `running` - Running\n\* `idle` - Idle\n\* `done` - Done'
         ),
     tag: zod
         .string()
@@ -245,18 +282,20 @@ export const CloudAgentsRunsCreateHeader = () => zod.object({
         ),
 })
 
-export const cloudAgentsRunsCreateBodyRepositoryMax = 255
+export const cloudAgentsRunsCreateBodyRepositoriesItemNameMax = 255
 
-export const cloudAgentsRunsCreateBodyRepositoryRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
-export const cloudAgentsRunsCreateBodyBranchMax = 255
+export const cloudAgentsRunsCreateBodyRepositoriesItemNameRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
+export const cloudAgentsRunsCreateBodyRepositoriesItemInitialBranchMax = 255
 
 export const cloudAgentsRunsCreateBodyModelMax = 100
 
 export const cloudAgentsRunsCreateBodyInstructionsMax = 20000
 
+export const cloudAgentsRunsCreateBodyIdleMinutesMax = 120
+
 export const cloudAgentsRunsCreateBodyPromptMax = 64000
 
-export const cloudAgentsRunsCreateBodyProfileMax = 100
+export const cloudAgentsRunsCreateBodyPresetMax = 100
 
 export const cloudAgentsRunsCreateBodyTagsItemMax = 50
 
@@ -266,24 +305,43 @@ export const cloudAgentsRunsCreateBodyMetadataMaxOne = 512
 
 export const CloudAgentsRunsCreateBody = () => zod
     .object({
-        repository: zod
-            .string()
-            .max(cloudAgentsRunsCreateBodyRepositoryMax)
-            .regex(cloudAgentsRunsCreateBodyRepositoryRegExp)
+        repositories: zod
+            .array(
+                zod.object({
+                    name: zod
+                        .string()
+                        .max(cloudAgentsRunsCreateBodyRepositoriesItemNameMax)
+                        .regex(cloudAgentsRunsCreateBodyRepositoriesItemNameRegExp)
+                        .describe('GitHub repository, in the format `owner\/name`.'),
+                    initial_branch: zod
+                        .string()
+                        .max(cloudAgentsRunsCreateBodyRepositoriesItemInitialBranchMax)
+                        .nullish()
+                        .describe('Branch that the agent starts from. Null uses the default branch of the repository.'),
+                })
+            )
             .nullish()
             .describe(
-                'GitHub repository that the agent works in, in the format `owner\/name`. Required unless the profile or the project settings set a default.'
+                'The repositories that the agent works in. Only one repository is supported for now. Required unless the preset or the project settings set a default.'
             ),
-        branch: zod
-            .string()
-            .max(cloudAgentsRunsCreateBodyBranchMax)
-            .nullish()
-            .describe('Default base branch. Null uses the default branch of the repository.'),
         model: zod
             .string()
             .max(cloudAgentsRunsCreateBodyModelMax)
             .nullish()
             .describe('Default model for the agent. Null lets PostHog select the model.'),
+        reasoning_effort: zod
+            .union([
+                zod
+                    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
+                    .describe(
+                        '\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+                    ),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.\n\n\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+            ),
         size: zod
             .union([
                 zod
@@ -313,28 +371,42 @@ export const CloudAgentsRunsCreateBody = () => zod
             .max(cloudAgentsRunsCreateBodyInstructionsMax)
             .nullish()
             .describe(
-                'Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.'
+                'Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.'
             ),
         create_pr: zod
             .boolean()
             .nullish()
             .describe('Whether the agent opens a pull request when it finishes. Null uses the product default.'),
+        idle_minutes: zod
+            .number()
+            .min(1)
+            .max(cloudAgentsRunsCreateBodyIdleMinutesMax)
+            .nullish()
+            .describe(
+                'How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.'
+            ),
+        output_schema: zod
+            .record(zod.string(), zod.unknown())
+            .nullish()
+            .describe(
+                'A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.'
+            ),
         prompt: zod
             .string()
             .max(cloudAgentsRunsCreateBodyPromptMax)
             .describe('The task for the agent, in plain language.'),
-        profile: zod
+        preset: zod
             .string()
-            .max(cloudAgentsRunsCreateBodyProfileMax)
+            .max(cloudAgentsRunsCreateBodyPresetMax)
             .nullish()
             .describe(
-                'ID or name of the profile whose defaults the run uses. Null uses the default profile of the project, when one is set.'
+                'ID or name of the preset whose defaults the run uses. Null uses the default preset of the project, when one is set.'
             ),
         tags: zod
             .array(zod.string().max(cloudAgentsRunsCreateBodyTagsItemMax))
             .max(cloudAgentsRunsCreateBodyTagsMax)
             .optional()
-            .describe('Tags for the run. The tags of the profile are added to them.'),
+            .describe('Tags for the run. The tags of the preset are added to them.'),
         metadata: zod
             .record(zod.string(), zod.string().max(cloudAgentsRunsCreateBodyMetadataMaxOne))
             .optional()
@@ -342,7 +414,7 @@ export const CloudAgentsRunsCreateBody = () => zod
                 'Your own key and value pairs, stored with the run and returned with it. At most 16 pairs. Keys and values are strings.'
             ),
     })
-    .describe('The run defaults that a profile and the project settings share. A null value sets no default.')
+    .describe('The run defaults that a preset and the project settings share. A null value sets no default.')
 
 /**
  * Base for every cloud_agents viewset: the scope object, the feature flag, and the error mapping.
@@ -358,7 +430,7 @@ export const CloudAgentsRunsRetrieveParams = () => zod.object({
 })
 
 /**
- * Asks the run to stop. The response has status 202 and the run can still be `running` for a short time. A run that already stopped is returned with status 200.
+ * Asks a `queued` or `running` run to stop. The response has status 202 and the run can still be `running` for a short time. It is then `done` with the reason `cancelled`. An `idle` or `done` run has no agent to stop, so it is returned with status 200 and does not change.
  * @summary Cancel a run
  */
 export const CloudAgentsRunsCancelCreateParams = () => zod.object({
@@ -371,7 +443,7 @@ export const CloudAgentsRunsCancelCreateParams = () => zod.object({
 })
 
 /**
- * By default, the response is one JSON object with the stored events of all agent sessions. To follow a live run, send `Accept: text/event-stream`. The response is then a Server-Sent Events stream of the current agent session. Its first frame is `event: run` with the ID, the status and the stop reason of the run. `Last-Event-ID` and `start=latest` apply to the stream only. To resume after a disconnect, send the `id` of the last event in the `Last-Event-ID` header.
+ * By default, the response is one JSON object with the stored events of all agent sessions. To follow a live run, send `Accept: text/event-stream`. The response is then a Server-Sent Events stream of the current agent session. Its first frame is `event: run` with the ID, the status and the status reason of the run. `Last-Event-ID` and `start=latest` apply to the stream only. To resume after a disconnect, send the `id` of the last event in the `Last-Event-ID` header.
  *
  * **SDK consumers**: a generated fetch wrapper buffers the stream. Use the JSON default through it, and read the stream with a streaming `fetch` or an `EventSource` client.
  * @summary Read the events of a run
@@ -406,7 +478,7 @@ export const CloudAgentsRunsEventsRetrieveHeader = () => zod.object({
 })
 
 /**
- * Sends a follow-up message. An agent that is at work gets the message in its current session. A run that stopped starts a new agent session with the message and goes back to `queued`.
+ * Sends a follow-up message. An agent that is at work gets the message in its current session. An `idle` run starts a new agent session with the message and goes back to `queued`. A `done` run refuses the message with status 409 and the code `run_done`.
  * @summary Send a message to a run
  */
 export const CloudAgentsRunsMessagesCreateParams = () => zod.object({
@@ -441,7 +513,7 @@ export const CloudAgentsRunsUsageRetrieveParams = () => zod.object({
 })
 
 /**
- * Cost and usage totals of the runs created in a date range, for each day or for each profile.
+ * Cost and usage totals of the runs created in a date range, for each day or for each preset.
  * @summary Retrieve cloud agents usage
  */
 export const CloudAgentsUsageRetrieveParams = () => zod.object({
@@ -464,9 +536,9 @@ export const CloudAgentsUsageRetrieveQueryParams = () => zod.object({
         .optional()
         .describe('End of the range, not included, in ISO 8601 format. The default is now.'),
     group_by: zod
-        .enum(['day', 'profile'])
+        .enum(['day', 'preset'])
         .default(cloudAgentsUsageRetrieveQueryGroupByDefault)
         .describe(
-            '`day` gives one bucket for each UTC day. `profile` gives one bucket for each profile.\n\n\* `day` - Day\n\* `profile` - Profile'
+            '`day` gives one bucket for each UTC day. `preset` gives one bucket for each preset.\n\n\* `day` - Day\n\* `preset` - Preset'
         ),
 })

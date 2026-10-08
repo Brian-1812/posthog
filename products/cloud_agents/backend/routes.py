@@ -7,7 +7,7 @@ PROJECT_ROUTES = [
     (r"cloud_agents/runs", views.CloudAgentRunViewSet, "project_cloud_agents_runs"),
     # The actions supply the last segment: cloud_agents/catalog, cloud_agents/estimate, cloud_agents/usage.
     (r"cloud_agents", views.CloudAgentsCatalogViewSet, "project_cloud_agents_catalog"),
-    (r"cloud_agents/profiles", views.CloudAgentProfileViewSet, "project_cloud_agents_profiles"),
+    (r"cloud_agents/presets", views.CloudAgentPresetViewSet, "project_cloud_agents_presets"),
     # The viewset's `settings` action supplies the last segment: cloud_agents/settings.
     (r"cloud_agents", views.CloudAgentSettingsViewSet, "project_cloud_agents_settings"),
 ]

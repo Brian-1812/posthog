@@ -29,8 +29,8 @@ from products.tasks.backend.facade.streams import sse_body_for_server_gateway
 from ..facade import api
 from ..facade.contracts import (
     InvalidInput,
-    ProfileCreateInput,
-    ProfileNotFound,
+    PresetCreateInput,
+    PresetNotFound,
     RunCreateInput,
     RunListFilters,
     RunNotFound,
@@ -41,6 +41,9 @@ from .serializers import (
     CloudAgentCatalogSerializer,
     CloudAgentEstimateQuerySerializer,
     CloudAgentEstimateSerializer,
+    CloudAgentPresetCreateSerializer,
+    CloudAgentPresetSerializer,
+    CloudAgentPresetUpdateSerializer,
     CloudAgentRunCreateSerializer,
     CloudAgentRunEventsSerializer,
     CloudAgentRunListQuerySerializer,
@@ -52,17 +55,14 @@ from .serializers import (
     CloudAgentSettingsUpdateSerializer,
     CloudAgentUsageQuerySerializer,
     CloudAgentUsageSummarySerializer,
-    ProfileCreateSerializer,
-    ProfileSerializer,
-    ProfileUpdateSerializer,
 )
 
 
-def _profile_id(pk: str) -> UUID:
-    profile_id = parse_uuid(pk)
-    if profile_id is None:
-        raise ProfileNotFound()
-    return profile_id
+def _preset_id(pk: str) -> UUID:
+    preset_id = parse_uuid(pk)
+    if preset_id is None:
+        raise PresetNotFound()
+    return preset_id
 
 
 def _run_id(pk: str) -> UUID:
@@ -163,7 +163,8 @@ class CloudAgentRunViewSet(CloudAgentsViewSet):
         summary="Send a message to a run",
         description=(
             "Sends a follow-up message. An agent that is at work gets the message in its current session. "
-            "A run that stopped starts a new agent session with the message and goes back to `queued`."
+            "An `idle` run starts a new agent session with the message and goes back to `queued`. "
+            "A `done` run refuses the message with status 409 and the code `run_done`."
         ),
         responses={202: OpenApiResponse(response=CloudAgentRunMessageResponseSerializer)},
     )
@@ -177,13 +178,14 @@ class CloudAgentRunViewSet(CloudAgentsViewSet):
     @extend_schema(
         summary="Cancel a run",
         description=(
-            "Asks the run to stop. The response has status 202 and the run can still be `running` for a "
-            "short time. A run that already stopped is returned with status 200."
+            "Asks a `queued` or `running` run to stop. The response has status 202 and the run can still be "
+            "`running` for a short time. It is then `done` with the reason `cancelled`. An `idle` or `done` "
+            "run has no agent to stop, so it is returned with status 200 and does not change."
         ),
         request=None,
         responses={
             202: OpenApiResponse(response=CloudAgentRunSerializer, description="The run is stopping."),
-            200: OpenApiResponse(response=CloudAgentRunSerializer, description="The run already stopped."),
+            200: OpenApiResponse(response=CloudAgentRunSerializer, description="The run has no agent to stop."),
         },
     )
     @action(methods=["POST"], detail=True)
@@ -208,7 +210,7 @@ class CloudAgentRunViewSet(CloudAgentsViewSet):
             "By default, the response is one JSON object with the stored events of all agent sessions. "
             "To follow a live run, send `Accept: text/event-stream`. The response is then a Server-Sent Events "
             "stream of the current agent session. Its first frame is `event: run` with the ID, the status and "
-            "the stop reason of the run. `Last-Event-ID` and `start=latest` apply to the stream only. To resume "
+            "the status reason of the run. `Last-Event-ID` and `start=latest` apply to the stream only. To resume "
             "after a disconnect, send the `id` of the last event in the `Last-Event-ID` header.\n\n"
             "**SDK consumers**: a generated fetch wrapper buffers the stream. Use the JSON default through it, "
             "and read the stream with a streaming `fetch` or an `EventSource` client."
@@ -295,7 +297,7 @@ class CloudAgentsCatalogViewSet(CloudAgentsViewSet):
     @validated_request(
         query_serializer=CloudAgentUsageQuerySerializer,
         summary="Retrieve cloud agents usage",
-        description="Cost and usage totals of the runs created in a date range, for each day or for each profile.",
+        description="Cost and usage totals of the runs created in a date range, for each day or for each preset.",
         responses={200: OpenApiResponse(response=CloudAgentUsageSummarySerializer)},
     )
     @action(methods=["GET"], detail=False, pagination_class=None)
@@ -310,54 +312,52 @@ class CloudAgentsCatalogViewSet(CloudAgentsViewSet):
         return Response(CloudAgentUsageSummarySerializer(summary).data)
 
 
-class CloudAgentProfileViewSet(CloudAgentsViewSet):
+class CloudAgentPresetViewSet(CloudAgentsViewSet):
     scope_object_read_actions = ["list", "retrieve"]
     scope_object_write_actions = ["create", "partial_update", "destroy"]
 
-    @extend_schema(summary="List profiles", responses={200: ProfileSerializer(many=True)})
+    @extend_schema(summary="List presets", responses={200: CloudAgentPresetSerializer(many=True)})
     def list(self, request: Request, **kwargs: Any) -> Response:
-        profiles = api.list_profiles(self.team_id)
-        page = self.paginate_queryset(profiles)
+        presets = api.list_presets(self.team_id)
+        page = self.paginate_queryset(presets)
         if page is not None:
-            return self.get_paginated_response(ProfileSerializer(page, many=True).data)
-        return Response(ProfileSerializer(profiles, many=True).data)
+            return self.get_paginated_response(CloudAgentPresetSerializer(page, many=True).data)
+        return Response(CloudAgentPresetSerializer(presets, many=True).data)
 
     @validated_request(
-        request_serializer=ProfileCreateSerializer,
-        summary="Create a profile",
-        description="A profile is a named set of run defaults. A run names a profile to use its defaults.",
-        responses={201: OpenApiResponse(response=ProfileSerializer)},
+        request_serializer=CloudAgentPresetCreateSerializer,
+        summary="Create a preset",
+        description="A preset is a named set of run defaults. A run that names a preset needs only a prompt.",
+        responses={201: OpenApiResponse(response=CloudAgentPresetSerializer)},
     )
     def create(self, request: ValidatedRequest, **kwargs: Any) -> Response:
-        profile = api.create_profile(
-            self.team_id, ProfileCreateInput(**request.validated_data), caller_from_request(request)
+        preset = api.create_preset(
+            self.team_id, PresetCreateInput(**request.validated_data), caller_from_request(request)
         )
-        return Response(ProfileSerializer(profile).data, status=status.HTTP_201_CREATED)
+        return Response(CloudAgentPresetSerializer(preset).data, status=status.HTTP_201_CREATED)
 
-    @extend_schema(summary="Retrieve a profile", responses={200: ProfileSerializer})
+    @extend_schema(summary="Retrieve a preset", responses={200: CloudAgentPresetSerializer})
     def retrieve(self, request: Request, pk: str, **kwargs: Any) -> Response:
-        return Response(ProfileSerializer(api.get_profile(self.team_id, _profile_id(pk))).data)
+        return Response(CloudAgentPresetSerializer(api.get_preset(self.team_id, _preset_id(pk))).data)
 
     @validated_request(
-        request_serializer=ProfileUpdateSerializer,
-        summary="Update a profile",
+        request_serializer=CloudAgentPresetUpdateSerializer,
+        summary="Update a preset",
         description="Only the fields in the request change. A null value clears a default.",
-        responses={200: OpenApiResponse(response=ProfileSerializer)},
+        responses={200: OpenApiResponse(response=CloudAgentPresetSerializer)},
     )
     def partial_update(self, request: ValidatedRequest, pk: str, **kwargs: Any) -> Response:
-        profile = api.update_profile(
-            self.team_id, _profile_id(pk), request.validated_data, caller_from_request(request)
-        )
-        return Response(ProfileSerializer(profile).data)
+        preset = api.update_preset(self.team_id, _preset_id(pk), request.validated_data, caller_from_request(request))
+        return Response(CloudAgentPresetSerializer(preset).data)
 
     @extend_schema(
-        summary="Delete a profile",
-        description="Runs that used the profile keep their configuration. The name becomes free.",
+        summary="Delete a preset",
+        description="Runs that used the preset keep their configuration. The name becomes free.",
         request=None,
         responses={204: None},
     )
     def destroy(self, request: Request, pk: str, **kwargs: Any) -> Response:
-        api.delete_profile(self.team_id, _profile_id(pk), caller_from_request(request))
+        api.delete_preset(self.team_id, _preset_id(pk), caller_from_request(request))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -390,7 +390,7 @@ class CloudAgentSettingsViewSet(CloudAgentsViewSet):
     )
     def update_team_settings(self, request: ValidatedRequest, **kwargs: Any) -> Response:
         changes = dict(request.validated_data)
-        if "default_profile" in changes:
-            changes["default_profile_id"] = changes.pop("default_profile")
+        if "default_preset" in changes:
+            changes["default_preset_id"] = changes.pop("default_preset")
         settings = api.update_team_settings(self.team_id, changes, caller_from_request(request))
         return Response(CloudAgentSettingsSerializer(settings).data)

@@ -15,10 +15,10 @@ from posthog.models.scoping import team_scope
 from posthog.token_bucket import BucketDecision
 
 from products.cloud_agents.backend.facade import api
-from products.cloud_agents.backend.facade.contracts import CallerIdentity, RunCreateInput
+from products.cloud_agents.backend.facade.contracts import CallerIdentity, RepositoryRef, RunCreateInput
 from products.cloud_agents.backend.facade.enums import BillingMode, CallerKind
 from products.cloud_agents.backend.logic.status import QUOTA_SWEEP_CANCEL_SOURCE
-from products.cloud_agents.backend.models import CloudAgentProfile, CloudAgentRun, TeamCloudAgentsConfig
+from products.cloud_agents.backend.models import CloudAgentPreset, CloudAgentRun, TeamCloudAgentsConfig
 from products.cloud_agents.backend.tests.base import (
     LOGIC,
     RUN_CONFIG,
@@ -39,7 +39,13 @@ from products.tasks.backend.facade.contracts import SandboxSessionUsageDTO
 from products.tasks.backend.facade.inference import InferenceDecision, InferenceUnavailable
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
-CREATE_BODY: dict[str, Any] = {"prompt": "Fix the flaky test", "repository": "acme/app"}
+CREATE_BODY: dict[str, Any] = {"prompt": "Fix the flaky test", "repositories": [{"name": "acme/app"}]}
+ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+}
+PR_URL = "https://github.com/acme/app/pull/7"
 OWN_SUBSCRIPTION_DECISION = InferenceDecision(
     mode="own_subscription",
     adapter="claude",
@@ -72,27 +78,26 @@ class TestCreateRun(RunsAPITestCase):
         assert response.json() == {
             "id": str(run.id),
             "status": "queued",
-            "stop_reason": None,
-            "error": None,
+            "status_reason": None,
+            "status_detail": None,
             "created_at": "2026-10-07T12:00:00Z",
             "started_at": None,
-            "completed_at": None,
+            "ended_at": None,
             "updated_at": "2026-10-07T12:00:00Z",
             "prompt": "Fix the flaky test",
-            "repository": "acme/app",
-            "branch": None,
-            "profile": None,
+            "repositories": [{"name": "acme/app", "initial_branch": None}],
+            "preset": None,
             "config": {
                 "model": run.config["model"],
+                "reasoning_effort": None,
                 "size": {"name": "4x16", "vcpu": 4, "memory_gib": 16, "price_per_hour_usd": "0.368"},
                 "inference": "posthog",
                 "create_pr": True,
-                "pr_mode": "draft",
-                "max_duration_minutes": 60,
-                "max_cost_usd": None,
+                "idle_minutes": 10,
+                "output_schema": None,
                 "instructions_applied": False,
             },
-            "result": {"pr_url": None, "pr_urls": [], "summary": None},
+            "result": {"pr_url": None, "pr_urls": [], "summary": None, "output": None},
             "cost": {
                 "compute_usd": None,
                 "inference_usd": None,
@@ -115,29 +120,66 @@ class TestCreateRun(RunsAPITestCase):
         assert call["prompt"] == call["title"] == "Fix the flaky test"
         assert call["sandbox_size"] == SandboxSize("4x16")
         assert call["inactivity_timeout_seconds"] == 600
-        assert call["extra_run_state"] == {"cloud_agents_run_id": str(run.id), "max_duration_minutes": 60}
+        assert call["extra_run_state"] == {"cloud_agents_run_id": str(run.id)}
         assert (call["model"], call["runtime_adapter"]) == (run.config["model"], "claude")
+        assert (call["repository"], call["branch"]) == ("acme/app", None)
+        assert (call["reasoning_effort"], call["output_schema"]) == (None, None)
         assert self.tasks.list_run_ids(team_id=self.team.id, task_id=run.task_id) != []
 
-    def test_profile_supplies_the_repository_and_instructions(self) -> None:
+    def test_preset_supplies_everything_but_the_prompt(self) -> None:
         with team_scope(self.team.id):
-            profile = CloudAgentProfile.objects.create(
-                team=self.team, name="Backend", repository="acme/api", instructions="Run the tests.", tags=["be"]
+            preset = CloudAgentPreset.objects.create(
+                team=self.team,
+                name="Backend",
+                repositories=[{"name": "acme/api", "initial_branch": "develop"}],
+                instructions="Run the tests.",
+                reasoning_effort="high",
+                idle_minutes=45,
+                output_schema=ANSWER_SCHEMA,
+                tags=["be"],
             )
-        response = self.create({"prompt": "Fix it", "profile": "backend", "tags": ["ci"]})
+        response = self.create({"prompt": "Fix it", "preset": "backend", "tags": ["ci"]})
 
         assert response.status_code == status.HTTP_201_CREATED, response.json()
         body = response.json()
-        assert body["repository"] == "acme/api"
-        assert body["profile"] == {"id": str(profile.id), "name": "Backend"}
+        assert body["repositories"] == [{"name": "acme/api", "initial_branch": "develop"}]
+        assert body["preset"] == {"id": str(preset.id), "name": "Backend"}
         assert body["tags"] == ["be", "ci"]
         assert body["config"]["instructions_applied"] is True
-        assert self.tasks.create_calls[0]["prompt"] == "<instructions>\nRun the tests.\n</instructions>\n\nFix it"
+        assert (body["config"]["reasoning_effort"], body["config"]["idle_minutes"]) == ("high", 45)
+        assert body["config"]["output_schema"] == ANSWER_SCHEMA
+        (call,) = self.tasks.create_calls
+        assert call["prompt"] == "<instructions>\nRun the tests.\n</instructions>\n\nFix it"
+        assert (call["repository"], call["branch"]) == ("acme/api", "develop")
+        assert (call["reasoning_effort"], call["inactivity_timeout_seconds"]) == ("high", 45 * 60)
+        assert call["output_schema"] == ANSWER_SCHEMA
+        (run,) = self.stored_runs()
+        assert (run.repository, run.preset_id) == ("acme/api", preset.id)
 
     @parameterized.expand(
         [
-            ("no_repository", {"prompt": "Fix it"}, "repository", "repository_required"),
-            ("unknown_profile", {**CREATE_BODY, "profile": "nope"}, "profile", "invalid_input"),
+            ("no_repository", {"prompt": "Fix it"}, "repositories", "repository_required"),
+            ("empty_repositories", {"prompt": "Fix it", "repositories": []}, "repositories", "repository_required"),
+            (
+                "two_repositories",
+                {"prompt": "Fix it", "repositories": [{"name": "acme/app"}, {"name": "acme/web"}]},
+                "repositories",
+                "invalid_input",
+            ),
+            ("unknown_preset", {**CREATE_BODY, "preset": "nope"}, "preset", "invalid_input"),
+            ("idle_minutes_over_the_tasks_limit", {**CREATE_BODY, "idle_minutes": 121}, "idle_minutes", "max_value"),
+            (
+                "unknown_reasoning_effort",
+                {**CREATE_BODY, "reasoning_effort": "extreme"},
+                "reasoning_effort",
+                "invalid_choice",
+            ),
+            (
+                "output_schema_of_a_string",
+                {**CREATE_BODY, "output_schema": {"type": "string"}},
+                "output_schema",
+                "invalid_input",
+            ),
             ("empty_prompt", {**CREATE_BODY, "prompt": ""}, "prompt", "blank"),
             ("unknown_model", {**CREATE_BODY, "model": "not-a-model"}, "model", "invalid_input"),
             (
@@ -272,6 +314,12 @@ class TestCreateRun(RunsAPITestCase):
                 CloudAgentTaskInvalid("This model is not available to you.", attr="model"),
                 "model",
             ),
+            (
+                "tasks_refuses_the_output_schema",
+                "runs.create_cloud_agent_task",
+                CloudAgentTaskInvalid("The output schema is too large.", attr="output_schema"),
+                "output_schema",
+            ),
         ]
     )
     def test_refused_start_leaves_no_run_and_refunds_the_rate(
@@ -311,7 +359,8 @@ class TestCreateRun(RunsAPITestCase):
             user_id=self.user.id, distinct_id=None, kind=CallerKind.INTERNAL, billable=False, product="signals"
         )
 
-        run, replayed = api.start_run(self.team.id, caller, RunCreateInput(**CREATE_BODY))
+        data = RunCreateInput(prompt="Fix the flaky test", repositories=[RepositoryRef(name="acme/app")])
+        run, replayed = api.start_run(self.team.id, caller, data)
 
         assert replayed is False
         assert self.tasks.create_calls[0]["billable"] is False
@@ -361,25 +410,37 @@ class TestCreateRunWithTasks(CloudAgentsFlagMixin, APIBaseTest):
 class TestReadRuns(RunsAPITestCase):
     def test_list_filters(self) -> None:
         with team_scope(self.team.id):
-            profile = CloudAgentProfile.objects.create(team=self.team, name="Backend")
+            preset = CloudAgentPreset.objects.create(team=self.team, name="Backend")
         with time_machine.travel(NOW - timedelta(days=2), tick=False):
-            old = self.make_run(repository="acme/api", tags=["ci"], profile=profile)
+            old = self.make_run(repository="acme/api", tags=["ci"], preset=preset)
+        with time_machine.travel(NOW - timedelta(days=1), tick=False):
+            merged = self.make_run(task_status="completed", tags=["ci"])
+            self.tasks.set_status(
+                self.tasks.current_run_id(merged), "completed", output={"pr_url": PR_URL, "pr_state": "merged"}
+            )
+            cancelled = self.make_run(task_status="cancelled")
         with time_machine.travel(NOW, tick=False):
             new = self.make_run(task_status="completed")
+            failed = self.make_run(task_status="failed")
+        idle = sorted([new, failed], key=lambda run: str(run.id), reverse=True)
+        done = sorted([merged, cancelled], key=lambda run: str(run.id), reverse=True)
         cases: list[tuple[str, list[CloudAgentRun]]] = [
-            ("", [new, old]),
-            ("?status=completed", [new]),
+            ("", [*idle, *done, old]),
+            ("?status=idle", idle),
+            ("?status=done", done),
             ("?status=queued", [old]),
-            (f"?profile_id={profile.id}", [old]),
+            (f"?preset_id={preset.id}", [old]),
             ("?repository=ACME/API", [old]),
             ("?repository=api", [old]),
-            ("?repository=acme", [new, old]),
-            ("?tag=ci", [old]),
+            ("?repository=acme", [*idle, *done, old]),
+            ("?tag=ci", [merged, old]),
             ("?tag=c", []),
-            ("?created_after=2026-10-06T00:00:00Z", [new]),
+            ("?created_after=2026-10-07T00:00:00Z", idle),
             ("?created_before=2026-10-06T00:00:00Z", [old]),
             ("?status=queued&repository=api", [old]),
-            ("?status=completed&repository=api", []),
+            ("?status=idle&repository=api", []),
+            ("?status=done&tag=ci", [merged]),
+            ("?status=idle&created_before=2026-10-07T00:00:00Z", []),
             ("?status=running", []),
         ]
         for query, expected in cases:
@@ -387,8 +448,23 @@ class TestReadRuns(RunsAPITestCase):
             assert [row["id"] for row in body["results"]] == [str(run.id) for run in expected], query
             assert body["count"] == len(expected), query
 
-    def test_list_rejects_an_unknown_status(self) -> None:
-        response = self.client.get(self.runs_url("?status=paused"))
+    def test_idle_and_done_filters_count_every_matching_run_and_read_one_page(self) -> None:
+        with time_machine.travel(NOW, tick=False):
+            idle = [self.make_run(task_status="completed") for _ in range(3)]
+            self.make_run(task_status="cancelled")
+            self.make_run(task_status="in_progress")
+        self.tasks.state_reads.clear()
+
+        page = self.client.get(self.runs_url("?status=idle&limit=2")).json()
+
+        assert page["count"] == 3
+        assert [row["id"] for row in page["results"]] == sorted((str(run.id) for run in idle), reverse=True)[:2]
+        # One read tells idle from done for the ended runs, and one read is for the page.
+        assert [len(task_ids) for task_ids in self.tasks.state_reads] == [4, 2]
+
+    @parameterized.expand([("paused",), ("completed",), ("failed",), ("cancelled",)])
+    def test_list_rejects_an_unknown_status(self, value: str) -> None:
+        response = self.client.get(self.runs_url(f"?status={value}"))
         assert (response.status_code, response.json()["attr"]) == (status.HTTP_400_BAD_REQUEST, "status")
 
     def test_list_pages_do_not_repeat_or_skip_runs_created_at_the_same_instant(self) -> None:
@@ -541,7 +617,7 @@ class TestReadRuns(RunsAPITestCase):
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"].startswith("text/event-stream")
         frames = body.decode().split("\n\n")
-        assert frames[0] == (f'event: run\ndata: {{"id": "{run.id}", "status": "running", "stop_reason": null}}')
+        assert frames[0] == (f'event: run\ndata: {{"id": "{run.id}", "status": "running", "status_reason": null}}')
         assert frames[1] == "id: 7\ndata: {}"
         prepare.assert_called_once_with(
             self.tasks.current_run_id(run), run.task_id, self.team.id, last_event_id="6", start_latest=True
@@ -571,29 +647,36 @@ class TestSendMessage(RunsAPITestCase):
         )
         assert self.tasks.resume_calls == []
 
-    def test_stopped_run_resumes_with_its_stored_size_and_model(self) -> None:
-        run = self.make_run(task_status="failed", config={**RUN_CONFIG, "size": "8x32"})
+    def test_idle_run_resumes_with_its_stored_configuration(self) -> None:
+        run = self.make_run(
+            task_status="failed",
+            config={**RUN_CONFIG, "size": "8x32", "reasoning_effort": "high", "idle_minutes": 45},
+        )
         self.tasks.billing = billing_dto(settled=True)
         previous_id = self.tasks.current_run_id(run)
         stopped = self.client.get(self.runs_url(f"{run.id}/")).json()
         self.tasks.billing = billing_dto(settled=False)
         response = self.send(run)
 
-        assert (stopped["status"], stopped["stop_reason"], stopped["cost"]["final"]) == ("failed", "error", True)
-        assert stopped["error"] is not None and stopped["completed_at"] is not None
+        assert (stopped["status"], stopped["status_reason"]) == ("idle", "unexpected_failure")
+        assert stopped["cost"]["final"] is True
+        assert stopped["status_detail"] is not None and stopped["ended_at"] is not None
         assert response.status_code == status.HTTP_202_ACCEPTED, response.json()
         body = response.json()
         assert body["resumed"] is True
-        assert (body["run"]["status"], body["run"]["stop_reason"], body["run"]["error"]) == ("queued", None, None)
-        assert (body["run"]["completed_at"], body["run"]["cost"]["final"]) == (None, False)
-        assert [(session["index"], session["status"]) for session in body["run"]["agent_sessions"]] == [
-            (1, "failed"),
+        resumed = body["run"]
+        assert (resumed["status"], resumed["status_reason"], resumed["status_detail"]) == ("queued", None, None)
+        assert (resumed["ended_at"], resumed["cost"]["final"]) == (None, False)
+        assert [(session["index"], session["status"]) for session in resumed["agent_sessions"]] == [
+            (1, "ended"),
             (2, "queued"),
         ]
         (call,) = self.tasks.resume_calls
         assert call["previous_run_id"] == previous_id
         assert call["message"] == "Also fix the lint"
         assert (call["sandbox_size"], call["model"]) == (SandboxSize("8x32"), "claude-test-model")
+        assert (call["reasoning_effort"], call["inactivity_timeout_seconds"]) == ("high", 45 * 60)
+        assert call["extra_run_state"] == {"cloud_agents_run_id": str(run.id)}
         assert (call["user_id"], call["inference_state"]) == (self.user.id, None)
         self.mocks["runs.signal_task_run_user_message"].assert_not_called()
         assert self.tasks.current_run_id(run) != previous_id
@@ -706,20 +789,37 @@ class TestCancelRun(RunsAPITestCase):
             ("not_found", 404),
         ]
     )
-    def test_cancel_outcome(self, outcome: str, http_status: int) -> None:
-        run = self.make_run(task_status="completed" if outcome == "already_terminal" else "in_progress")
+    def test_cancel_outcome_of_an_active_run(self, outcome: str, http_status: int) -> None:
+        run = self.make_run(task_status="in_progress")
         self.mocks["runs.cancel_task_run"].return_value = (outcome, None)
 
         response = self.client.post(self.runs_url(f"{run.id}/cancel/"))
 
         assert response.status_code == http_status, response.json()
-        if http_status == 200:
-            assert response.json()["status"] == "completed"
         if http_status == 503:
             assert (response.json()["code"], response.headers["Retry-After"]) == ("cancel_unavailable", "5")
         args, kwargs = self.mocks["runs.cancel_task_run"].call_args
         assert args == (self.tasks.current_run_id(run), run.task_id, self.team.id)
-        assert kwargs["requested_by_user_id"] == self.user.id
+        assert (kwargs["source"], kwargs["requested_by_user_id"]) == ("cloud_agents_api", self.user.id)
+
+    @parameterized.expand(
+        [
+            ("idle", "completed", {}, "idle", "turn_closed"),
+            ("idle_after_a_failure", "failed", {}, "idle", "unexpected_failure"),
+            ("done", "cancelled", {"cancel_source": "cloud_agents_api"}, "done", "cancelled"),
+        ]
+    )
+    def test_cancel_of_a_run_with_no_agent_at_work_changes_nothing(
+        self, _name: str, task_status: str, state: dict[str, Any], run_status: str, reason: str
+    ) -> None:
+        run = self.make_run(task_status="in_progress")
+        self.tasks.set_status(self.tasks.current_run_id(run), task_status, state=state)
+
+        response = self.client.post(self.runs_url(f"{run.id}/cancel/"))
+
+        assert response.status_code == status.HTTP_200_OK, response.json()
+        assert (response.json()["status"], response.json()["status_reason"]) == (run_status, reason)
+        self.mocks["runs.cancel_task_run"].assert_not_called()
 
     def test_task_that_tasks_does_not_hold_for_this_product_is_never_cancelled(self) -> None:
         run = self.make_run(task_id=uuid4())
@@ -727,13 +827,84 @@ class TestCancelRun(RunsAPITestCase):
         assert (response.status_code, response.json()["code"]) == (status.HTTP_409_CONFLICT, "run_not_ready")
         self.mocks["runs.cancel_task_run"].assert_not_called()
 
-    def test_run_that_the_quota_sweep_cancelled_reads_as_stopped_by_the_usage_limit(self) -> None:
+
+class TestRunStatus(RunsAPITestCase):
+    def read(self, run: CloudAgentRun) -> dict[str, Any]:
+        return self.client.get(self.runs_url(f"{run.id}/")).json()
+
+    @parameterized.expand(
+        [
+            ("turn_closed", "completed", {}, None, "idle", "turn_closed", False),
+            ("pr_open", "completed", {}, {"pr_url": PR_URL, "pr_state": "open"}, "idle", "turn_closed", False),
+            ("pr_merged", "completed", {}, {"pr_url": PR_URL, "pr_state": "merged"}, "done", "finished", True),
+            ("pr_closed", "completed", {}, {"pr_url": PR_URL, "pr_state": "closed"}, "done", "closed", True),
+            (
+                "infrastructure_failure",
+                "failed",
+                {"compute_waived_reason": "SandboxProvisionError"},
+                None,
+                "idle",
+                "provision_failed",
+                True,
+            ),
+            ("timeout", "failed", {"timed_out_inactivity": True}, None, "idle", "timed_out", True),
+            (
+                "quota_sweep",
+                "cancelled",
+                {"cancel_source": QUOTA_SWEEP_CANCEL_SOURCE},
+                None,
+                "idle",
+                "credit_spent",
+                True,
+            ),
+            ("user_cancel", "cancelled", {"cancel_source": "cloud_agents_api"}, None, "done", "cancelled", False),
+        ]
+    )
+    def test_ended_run_reads_as_idle_or_done(
+        self,
+        _name: str,
+        task_status: str,
+        state: dict[str, Any],
+        output: dict[str, Any] | None,
+        run_status: str,
+        reason: str,
+        has_detail: bool,
+    ) -> None:
         run = self.make_run(task_status="in_progress")
-        self.tasks.set_status(
-            self.tasks.current_run_id(run), "cancelled", state={"cancel_source": QUOTA_SWEEP_CANCEL_SOURCE}
-        )
+        self.tasks.set_status(self.tasks.current_run_id(run), task_status, state=state, output=output)
 
-        body = self.client.get(self.runs_url(f"{run.id}/")).json()
+        body = self.read(run)
+        message = self.client.post(self.runs_url(f"{run.id}/messages/"), data={"content": "Go on"}, format="json")
 
-        assert (body["status"], body["stop_reason"]) == ("cancelled", "usage_limit")
-        assert "usage limit" in body["error"]
+        assert (body["status"], body["status_reason"]) == (run_status, reason)
+        assert (body["status_detail"] is not None) is has_detail
+        assert body["ended_at"] is not None
+        if run_status == "done":
+            assert (message.status_code, message.json()["code"]) == (status.HTTP_409_CONFLICT, "run_done")
+            assert self.tasks.resume_calls == []
+        else:
+            assert (message.status_code, message.json()["resumed"]) == (status.HTTP_202_ACCEPTED, True)
+
+    def test_done_run_refuses_a_message_before_the_quota_check(self) -> None:
+        run = self.make_run(task_status="cancelled")
+        self.mocks["runs.cloud_agents_quota_denial"].return_value = "quota_exhausted"
+        response = self.client.post(self.runs_url(f"{run.id}/messages/"), data={"content": "Go on"}, format="json")
+        assert (response.status_code, response.json()["code"]) == (status.HTTP_409_CONFLICT, "run_done")
+
+    @parameterized.expand(
+        [
+            ("with_schema", ANSWER_SCHEMA, {"answer": "42", "pr_url": PR_URL}, {"answer": "42"}),
+            ("with_schema_and_no_result_yet", ANSWER_SCHEMA, {"pr_url": PR_URL}, None),
+            ("without_schema", None, {"answer": "42"}, None),
+        ]
+    )
+    def test_structured_result(
+        self, _name: str, schema: dict[str, Any] | None, output: dict[str, Any], expected: dict[str, Any] | None
+    ) -> None:
+        run = self.make_run(task_status="in_progress", config={**RUN_CONFIG, "output_schema": schema})
+        self.tasks.set_status(self.tasks.current_run_id(run), "completed", output=output)
+
+        body = self.read(run)
+
+        assert body["result"]["output"] == expected
+        assert body["config"]["output_schema"] == schema

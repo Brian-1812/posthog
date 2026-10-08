@@ -33,6 +33,7 @@ from products.tasks.backend.logic.services.sandbox_pricing import (
     SandboxComputeCost,
     calculate_sandbox_compute_cost,
     compute_pricing,
+    compute_waived,
 )
 from products.tasks.backend.models import SandboxSession, TaskRun
 
@@ -278,12 +279,10 @@ def _token_cost_microusd(run: TaskRun) -> int | None:
     return None
 
 
-def _session_compute_cost(
-    session: SandboxSession, product: BillingProduct, now: datetime
-) -> tuple[SandboxComputeCost, bool]:
-    """The session's cost to date at the product's price, and whether its charge is waived."""
+def _session_compute_cost(session: SandboxSession, product: BillingProduct, now: datetime) -> SandboxComputeCost:
+    """The session's cost to date at the product's price."""
     pricing = compute_pricing(product)
-    cost = calculate_sandbox_compute_cost(
+    return calculate_sandbox_compute_cost(
         session,
         pricing.rate_cards[0].effective_at,
         now,
@@ -291,7 +290,6 @@ def _session_compute_cost(
         rate_cards=pricing.rate_cards,
         resource_policy=pricing.resource_policy,
     )
-    return cost, product == "cloud_agents" and session.waived_at is not None
 
 
 def _compute_cost_source(run: TaskRun, *, sessions: list[SandboxSession] | None = None) -> Decimal | None:
@@ -305,14 +303,11 @@ def _compute_cost_source(run: TaskRun, *, sessions: list[SandboxSession] | None 
         sessions = list(SandboxSession.objects.for_team(run.team_id).filter(task_run=run))
     if not sessions:
         return None
+    if compute_waived(product, run.state):
+        return Decimal(0)
     now = timezone.now()
     try:
-        total = Decimal(0)
-        for session in sessions:
-            cost, waived = _session_compute_cost(session, product, now)
-            if not waived:
-                total += cost.total_cost_usd
-        return total
+        return sum((_session_compute_cost(session, product, now).total_cost_usd for session in sessions), Decimal(0))
     except ValueError:
         return None
 
@@ -389,12 +384,13 @@ def _task_billing(runs: list[TaskRun], sessions: list[SandboxSession], now: date
     compute_usd: Decimal | None = Decimal(0) if sessions and pricing.rate_cards else None
     vcpu_seconds = Decimal(0)
     gib_seconds = Decimal(0)
+    waived_run_ids = {run.id for run in runs if compute_waived(product, run.state)}
     for session in sessions:
         cost: SandboxComputeCost | None = None
-        waived = product == "cloud_agents" and session.waived_at is not None
+        waived = session.task_run_id in waived_run_ids
         if pricing.rate_cards:
             try:
-                cost, waived = _session_compute_cost(session, product, now)
+                cost = _session_compute_cost(session, product, now)
             except ValueError:
                 compute_usd = None
         if cost is not None and not waived:

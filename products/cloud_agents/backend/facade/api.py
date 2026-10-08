@@ -17,7 +17,7 @@ from ..logic import (
     catalog as catalog_logic,
     config_resolution,
     limits as limits_logic,
-    profiles as profiles_logic,
+    presets as presets_logic,
     runs as runs_logic,
     settings as settings_logic,
     streams as streams_logic,
@@ -28,8 +28,8 @@ from .contracts import (
     CatalogDTO,
     EstimateDTO,
     MessageResult,
-    ProfileCreateInput,
-    ProfileDTO,
+    PresetCreateInput,
+    PresetDTO,
     ResolvedRunConfig,
     RunCreateInput,
     RunDTO,
@@ -42,15 +42,15 @@ from .contracts import (
 )
 from .enums import SizeName, UsageGroupBy
 
-MIN_DURATION_MINUTES = config_resolution.MIN_DURATION_MINUTES
-MAX_DURATION_MINUTES = config_resolution.MAX_DURATION_MINUTES
+MIN_IDLE_MINUTES = config_resolution.MIN_IDLE_MINUTES
+MAX_IDLE_MINUTES = config_resolution.MAX_IDLE_MINUTES
 
 
 # --- Run configuration ---
 
 
-def resolve_run_config(call: RunCreateInput, profile: ProfileDTO | None, team: TeamSettingsDTO) -> ResolvedRunConfig:
-    return config_resolution.resolve_run_config(call, profile, team)
+def resolve_run_config(call: RunCreateInput, preset: PresetDTO | None, team: TeamSettingsDTO) -> ResolvedRunConfig:
+    return config_resolution.resolve_run_config(call, preset, team)
 
 
 def render_prompt(config: ResolvedRunConfig, prompt: str) -> str:
@@ -85,7 +85,7 @@ def send_message(team_id: int, caller: CallerIdentity, run_id: UUID, content: st
 
 
 def cancel_run(team_id: int, caller: CallerIdentity, run_id: UUID) -> tuple[RunDTO, bool]:
-    """Ask the run to stop. The flag is False when the run already ended."""
+    """Ask the run to stop. The flag is False when the run has no agent at work."""
     return runs_logic.cancel_run(team_id, caller, run_id)
 
 
@@ -128,31 +128,31 @@ def get_usage_summary(
     return usage_logic.get_usage_summary(team_id, date_from=date_from, date_to=date_to, group_by=group_by)
 
 
-# --- Profiles ---
+# --- Presets ---
 
 
-def list_profiles(team_id: int) -> list[ProfileDTO]:
-    return profiles_logic.list_profiles(team_id)
+def list_presets(team_id: int) -> list[PresetDTO]:
+    return presets_logic.list_presets(team_id)
 
 
-def get_profile(team_id: int, profile_id: UUID) -> ProfileDTO:
-    return profiles_logic.get_profile(team_id, profile_id)
+def get_preset(team_id: int, preset_id: UUID) -> PresetDTO:
+    return presets_logic.get_preset(team_id, preset_id)
 
 
-def get_profile_by_ref(team_id: int, ref: str) -> ProfileDTO:
-    return profiles_logic.get_profile_by_ref(team_id, ref)
+def get_preset_by_ref(team_id: int, ref: str) -> PresetDTO:
+    return presets_logic.get_preset_by_ref(team_id, ref)
 
 
-def create_profile(team_id: int, data: ProfileCreateInput, caller: CallerIdentity) -> ProfileDTO:
-    return profiles_logic.create_profile(team_id, data, caller)
+def create_preset(team_id: int, data: PresetCreateInput, caller: CallerIdentity) -> PresetDTO:
+    return presets_logic.create_preset(team_id, data, caller)
 
 
-def update_profile(team_id: int, profile_id: UUID, changes: Mapping[str, Any], caller: CallerIdentity) -> ProfileDTO:
-    return profiles_logic.update_profile(team_id, profile_id, changes, caller)
+def update_preset(team_id: int, preset_id: UUID, changes: Mapping[str, Any], caller: CallerIdentity) -> PresetDTO:
+    return presets_logic.update_preset(team_id, preset_id, changes, caller)
 
 
-def delete_profile(team_id: int, profile_id: UUID, caller: CallerIdentity) -> None:
-    profiles_logic.delete_profile(team_id, profile_id, caller)
+def delete_preset(team_id: int, preset_id: UUID, caller: CallerIdentity) -> None:
+    presets_logic.delete_preset(team_id, preset_id, caller)
 
 
 # --- Project settings ---

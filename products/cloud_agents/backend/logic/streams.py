@@ -46,7 +46,7 @@ async def run_event_stream(stream: RunEventStream) -> AsyncGenerator[bytes]:
         {
             "id": str(run.id),
             "status": run.status.value,
-            "stop_reason": run.stop_reason.value if run.stop_reason else None,
+            "status_reason": run.status_reason.value if run.status_reason else None,
         },
         event_name=RUN_EVENT_NAME,
     )

@@ -18,12 +18,13 @@ from posthog.dataclasses import frozen
 from .enums import (
     BillingMode,
     CallerKind,
+    CloudAgentReasoningEffort,
     CloudAgentRunStatus,
+    CloudAgentRunStatusReason,
+    CloudAgentSessionStatus,
     InferenceBilling,
     InferenceMode,
-    PrMode,
     SizeName,
-    StopReason,
     UsageGroupBy,
     size_shape,
 )
@@ -56,41 +57,57 @@ class SizeSpec:
 
 
 @frozen
+class RepositoryRef:
+    """A GitHub repository, as `owner/name`, and the branch that the agent starts from.
+
+    With no `initial_branch`, the agent starts from the default branch of the repository.
+    """
+
+    name: str
+    initial_branch: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {"name": self.name, "initial_branch": self.initial_branch}
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> RepositoryRef:
+        return cls(name=data["name"], initial_branch=data.get("initial_branch"))
+
+
+@frozen
 class RunCreateInput:
-    """One request to start a run. `profile` is a profile id or a profile name."""
+    """One request to start a run. `preset` is a preset id or a preset name."""
 
     prompt: str
-    repository: str | None = None
-    branch: str | None = None
-    profile: str | None = None
+    repositories: list[RepositoryRef] | None = None
+    preset: str | None = None
     model: str | None = None
+    reasoning_effort: CloudAgentReasoningEffort | None = None
     size: SizeName | None = None
     inference: InferenceMode | None = None
     instructions: str | None = None
     create_pr: bool | None = None
-    pr_mode: PrMode | None = None
-    max_duration_minutes: int | None = None
-    max_cost_usd: Decimal | None = None
+    idle_minutes: int | None = None
+    output_schema: dict[str, Any] | None = None
     tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
     idempotency_key: str | None = None
 
 
 @frozen
-class ProfileDTO:
+class PresetDTO:
     id: UUID
     name: str
     description: str
-    repository: str | None
-    branch: str | None
+    repositories: list[RepositoryRef] | None
     model: str | None
+    reasoning_effort: CloudAgentReasoningEffort | None
     size: SizeName | None
     inference: InferenceMode | None
     instructions: str | None
     create_pr: bool | None
-    pr_mode: PrMode | None
-    max_duration_minutes: int | None
-    max_cost_usd: Decimal | None
+    idle_minutes: int | None
+    output_schema: dict[str, Any] | None
     tags: list[str]
     created_by_id: int | None
     created_at: datetime
@@ -98,19 +115,18 @@ class ProfileDTO:
 
 
 @frozen
-class ProfileCreateInput:
+class PresetCreateInput:
     name: str
     description: str = ""
-    repository: str | None = None
-    branch: str | None = None
+    repositories: list[RepositoryRef] | None = None
     model: str | None = None
+    reasoning_effort: CloudAgentReasoningEffort | None = None
     size: SizeName | None = None
     inference: InferenceMode | None = None
     instructions: str | None = None
     create_pr: bool | None = None
-    pr_mode: PrMode | None = None
-    max_duration_minutes: int | None = None
-    max_cost_usd: Decimal | None = None
+    idle_minutes: int | None = None
+    output_schema: dict[str, Any] | None = None
     tags: list[str] = field(default_factory=list)
 
 
@@ -118,17 +134,16 @@ class ProfileCreateInput:
 class TeamSettingsDTO:
     """Project defaults for runs. The limits are the effective values, after any override."""
 
-    repository: str | None
-    branch: str | None
+    repositories: list[RepositoryRef] | None
     model: str | None
+    reasoning_effort: CloudAgentReasoningEffort | None
     size: SizeName | None
     inference: InferenceMode | None
     instructions: str | None
     create_pr: bool | None
-    pr_mode: PrMode | None
-    max_duration_minutes: int | None
-    max_cost_usd: Decimal | None
-    default_profile_id: UUID | None
+    idle_minutes: int | None
+    output_schema: dict[str, Any] | None
+    default_preset_id: UUID | None
     max_concurrent_runs: int
     create_rate_per_hour: int
     updated_at: datetime | None
@@ -136,54 +151,51 @@ class TeamSettingsDTO:
 
 @frozen
 class ResolvedRunConfig:
-    """The configuration a run uses, after the call, the profile, the project and the product defaults are merged."""
+    """The configuration a run uses, after the call, the preset, the project and the product defaults are merged."""
 
-    repository: str
-    branch: str | None
+    repositories: list[RepositoryRef]
     model: str | None
+    reasoning_effort: CloudAgentReasoningEffort | None
     size: SizeName
     inference: InferenceMode
     instructions: str | None
     create_pr: bool
-    pr_mode: PrMode
-    max_duration_minutes: int
-    max_cost_usd: Decimal | None
+    idle_minutes: int
+    output_schema: dict[str, Any] | None
     tags: list[str]
-    profile_id: UUID | None
+    preset_id: UUID | None
 
     def to_json(self) -> dict[str, Any]:
         return {
-            "repository": self.repository,
-            "branch": self.branch,
+            "repositories": [repository.to_json() for repository in self.repositories],
             "model": self.model,
+            "reasoning_effort": None if self.reasoning_effort is None else self.reasoning_effort.value,
             "size": self.size.value,
             "inference": self.inference.value,
             "instructions": self.instructions,
             "create_pr": self.create_pr,
-            "pr_mode": self.pr_mode.value,
-            "max_duration_minutes": self.max_duration_minutes,
-            "max_cost_usd": None if self.max_cost_usd is None else str(self.max_cost_usd),
+            "idle_minutes": self.idle_minutes,
+            "output_schema": self.output_schema,
             "tags": list(self.tags),
-            "profile_id": None if self.profile_id is None else str(self.profile_id),
+            "preset_id": None if self.preset_id is None else str(self.preset_id),
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> ResolvedRunConfig:
-        max_cost_usd = data.get("max_cost_usd")
-        profile_id = data.get("profile_id")
+        reasoning_effort = data.get("reasoning_effort")
+        preset_id = data.get("preset_id")
         return cls(
-            repository=data["repository"],
-            branch=data.get("branch"),
+            repositories=[RepositoryRef.from_json(repository) for repository in data["repositories"]],
             model=data.get("model"),
+            reasoning_effort=None if reasoning_effort is None else CloudAgentReasoningEffort(reasoning_effort),
             size=SizeName(data["size"]),
             inference=InferenceMode(data["inference"]),
             instructions=data.get("instructions"),
             create_pr=data["create_pr"],
-            pr_mode=PrMode(data["pr_mode"]),
-            max_duration_minutes=data["max_duration_minutes"],
-            max_cost_usd=None if max_cost_usd is None else Decimal(str(max_cost_usd)),
+            idle_minutes=data["idle_minutes"],
+            output_schema=data.get("output_schema"),
             tags=list(data.get("tags") or []),
-            profile_id=None if profile_id is None else UUID(str(profile_id)),
+            preset_id=None if preset_id is None else UUID(str(preset_id)),
         )
 
 
@@ -191,16 +203,19 @@ class ResolvedRunConfig:
 class AgentSessionDTO:
     index: int
     task_run_id: UUID
-    status: CloudAgentRunStatus
+    status: CloudAgentSessionStatus
     started_at: datetime | None
     ended_at: datetime | None
 
 
 @frozen
 class RunResultDTO:
+    """`output` is the result that matches the output schema of the run. None for a run with no schema."""
+
     pr_url: str | None
     pr_urls: list[str]
     summary: str | None
+    output: dict[str, Any] | None
 
 
 @frozen
@@ -219,17 +234,16 @@ class RunCostDTO:
 class RunDTO:
     id: UUID
     status: CloudAgentRunStatus
-    stop_reason: StopReason | None
-    error: str | None
+    status_reason: CloudAgentRunStatusReason | None
+    status_detail: str | None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None
-    completed_at: datetime | None
+    ended_at: datetime | None
     prompt: str
-    repository: str
-    branch: str | None
-    profile_id: UUID | None
-    profile_name: str | None
+    repositories: list[RepositoryRef]
+    preset_id: UUID | None
+    preset_name: str | None
     config: ResolvedRunConfig
     size: SizeSpec
     result: RunResultDTO
@@ -253,7 +267,7 @@ class MessageResult:
 @frozen
 class RunListFilters:
     status: CloudAgentRunStatus | None = None
-    profile_id: UUID | None = None
+    preset_id: UUID | None = None
     repository: str | None = None
     tag: str | None = None
     created_after: datetime | None = None
@@ -348,7 +362,7 @@ class UsageTotalsDTO:
 
 @frozen
 class UsageBucketDTO:
-    """`key` is a date for `group_by=day`, and a profile id or None for `group_by=profile`."""
+    """`key` is a date for `group_by=day`, and a preset id or None for `group_by=preset`."""
 
     key: str | None
     label: str | None
@@ -391,18 +405,18 @@ class RunNotFound(CloudAgentsError):
     default_message = "This run does not exist in this project."
 
 
-class ProfileNotFound(CloudAgentsError):
-    code = "profile_not_found"
+class PresetNotFound(CloudAgentsError):
+    code = "preset_not_found"
     status_code = 404
-    default_message = "This profile does not exist in this project."
+    default_message = "This preset does not exist in this project."
 
 
 class RepositoryRequired(InvalidInput):
     code = "repository_required"
-    default_message = "Set a repository on the run, on its profile, or in the project settings."
+    default_message = "Set a repository on the run, on its preset, or in the project settings."
 
     def __init__(self) -> None:
-        super().__init__(attr="repository")
+        super().__init__(attr="repositories")
 
 
 class IdempotencyKeyReused(CloudAgentsError):
@@ -415,6 +429,12 @@ class RunStopping(CloudAgentsError):
     code = "run_stopping"
     status_code = 409
     default_message = "This run is stopping. Wait until it stops, then try again."
+
+
+class RunDone(CloudAgentsError):
+    code = "run_done"
+    status_code = 409
+    default_message = "This run is done and cannot continue. Start a new run."
 
 
 class RunNotResumable(CloudAgentsError):

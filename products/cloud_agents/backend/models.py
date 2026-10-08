@@ -12,28 +12,28 @@ from django.db.models.functions import Lower
 from posthog.models.scoping.root_mixin import TeamScopedRootMixin
 from posthog.models.utils import uuid7
 
-from .facade.enums import CallerKind, InferenceMode, PrMode, SizeName
+from .facade.enums import CallerKind, CloudAgentReasoningEffort, InferenceMode, SizeName
 
 
 class RunDefaultsMixin(models.Model):
-    """Run defaults that a profile and the project settings both hold. A null field sets no default."""
+    """Run defaults that a preset and the project settings both hold. A null field sets no default."""
 
-    repository = models.CharField(max_length=255, null=True, blank=True)
-    branch = models.CharField(max_length=255, null=True, blank=True)
+    # A list of `{"name": "owner/name", "initial_branch": "main" or null}`, the shape of `RepositoryRef`.
+    repositories = models.JSONField(null=True, blank=True)
     model = models.CharField(max_length=100, null=True, blank=True)
+    reasoning_effort = models.CharField(max_length=16, choices=CloudAgentReasoningEffort.choices, null=True, blank=True)
     size = models.CharField(max_length=16, choices=SizeName.choices, null=True, blank=True)
     inference = models.CharField(max_length=32, choices=InferenceMode.choices, null=True, blank=True)
     instructions = models.TextField(null=True, blank=True)
     create_pr = models.BooleanField(null=True, blank=True)
-    pr_mode = models.CharField(max_length=16, choices=PrMode.choices, null=True, blank=True)
-    max_duration_minutes = models.PositiveIntegerField(null=True, blank=True)
-    max_cost_usd = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    idle_minutes = models.PositiveIntegerField(null=True, blank=True)
+    output_schema = models.JSONField(null=True, blank=True)
 
     class Meta:
         abstract = True
 
 
-class CloudAgentProfile(RunDefaultsMixin, TeamScopedRootMixin):
+class CloudAgentPreset(RunDefaultsMixin, TeamScopedRootMixin):
     # `objects` (TeamScopedManager) from TeamScopedRootMixin is fail-closed. `all_teams` is the
     # unscoped manager that Django internals use through Meta.default_manager_name.
     all_teams = models.Manager()  # noqa: DJ012
@@ -60,7 +60,7 @@ class CloudAgentProfile(RunDefaultsMixin, TeamScopedRootMixin):
                 "team",
                 Lower("name"),
                 condition=models.Q(deleted=False),
-                name="cloud_agents_profile_unique_name",
+                name="cloud_agents_preset_unique_name",
             ),
         ]
 
@@ -86,16 +86,17 @@ class CloudAgentRun(TeamScopedRootMixin):
     task_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     prompt = models.TextField()
+    # The name of the repository of the run, as a column so that the list can filter by it. The
+    # full list, with the branches, is in `config`.
     repository = models.CharField(max_length=255)
-    branch = models.CharField(max_length=255, null=True, blank=True)
-    profile = models.ForeignKey(CloudAgentProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    preset = models.ForeignKey(CloudAgentPreset, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     tags = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     idempotency_key = models.CharField(max_length=100, null=True, blank=True)
     request_hash = models.CharField(max_length=64, null=True, blank=True)
 
     # Snapshot of the resolved configuration (ResolvedRunConfig.to_json), so a later change to a
-    # profile or to the project settings does not change a run that already started.
+    # preset or to the project settings does not change a run that already started.
     config = models.JSONField(default=dict)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -126,8 +127,8 @@ class TeamCloudAgentsConfig(RunDefaultsMixin, TeamScopedRootMixin):
     team = models.OneToOneField(
         "posthog.Team", on_delete=models.CASCADE, primary_key=True, related_name="+", db_constraint=False
     )
-    default_profile = models.ForeignKey(
-        CloudAgentProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    default_preset = models.ForeignKey(
+        CloudAgentPreset, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     # Staff set these overrides. A null value means the product default in logic/limits.py.
     max_concurrent_runs = models.PositiveIntegerField(null=True, blank=True)

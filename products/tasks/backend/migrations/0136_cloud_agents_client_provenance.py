@@ -9,25 +9,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name="sandboxsession",
-            name="waived_at",
-            field=models.DateTimeField(
-                blank=True,
-                help_text="When the charge for this session was waived; NULL while it bills as usual",
-                null=True,
-            ),
-        ),
-        migrations.AddField(
-            model_name="sandboxsession",
-            name="waived_reason",
-            field=models.CharField(
-                blank=True,
-                help_text="Why the charge was waived, e.g. the infrastructure error type",
-                max_length=64,
-                null=True,
-            ),
-        ),
         migrations.AlterField(
             model_name="loop",
             name="client_provenance",

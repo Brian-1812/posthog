@@ -13,6 +13,7 @@ them. They also do no origin check: resolve the run with ``get_cloud_agent_task_
 
 from products.tasks.backend.facade.contracts import (
     CloudAgentActiveRunDTO,
+    CloudAgentPullRequestDTO,
     CloudAgentSessionDTO,
     CloudAgentTaskDTO,
     CloudAgentTaskStateDTO,
@@ -20,6 +21,7 @@ from products.tasks.backend.facade.contracts import (
     CloudAgentUsageDTO,
 )
 from products.tasks.backend.logic.services.cloud_agent_tasks import (
+    OUTPUT_SCHEMA_MAX_BYTES,
     CloudAgentRunNotResumable,
     CloudAgentTaskError,
     CloudAgentTaskInvalid,
@@ -37,10 +39,15 @@ from products.tasks.backend.logic.services.cloud_agent_tasks import (
     list_cloud_agent_task_run_ids,
     resume_cloud_agent_task,
     summarize_cloud_agent_usage,
+    validate_cloud_agent_output_schema,
 )
+from products.tasks.backend.temporal.constants import MAX_INACTIVITY_TIMEOUT_SECONDS
 
 __all__ = [
+    "MAX_INACTIVITY_TIMEOUT_SECONDS",
+    "OUTPUT_SCHEMA_MAX_BYTES",
     "CloudAgentActiveRunDTO",
+    "CloudAgentPullRequestDTO",
     "CloudAgentRunNotResumable",
     "CloudAgentSessionDTO",
     "CloudAgentTaskDTO",
@@ -63,4 +70,5 @@ __all__ = [
     "list_cloud_agent_task_run_ids",
     "resume_cloud_agent_task",
     "summarize_cloud_agent_usage",
+    "validate_cloud_agent_output_schema",
 ]

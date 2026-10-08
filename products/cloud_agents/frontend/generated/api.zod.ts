@@ -10,48 +10,67 @@
 import * as zod from 'zod'
 
 /**
- * A profile is a named set of run defaults. A run names a profile to use its defaults.
- * @summary Create a profile
+ * A preset is a named set of run defaults. A run that names a preset needs only a prompt.
+ * @summary Create a preset
  */
-export const cloudAgentsProfilesCreateBodyRepositoryMax = 255
+export const cloudAgentsPresetsCreateBodyRepositoriesItemNameMax = 255
 
-export const cloudAgentsProfilesCreateBodyRepositoryRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
-export const cloudAgentsProfilesCreateBodyBranchMax = 255
+export const cloudAgentsPresetsCreateBodyRepositoriesItemNameRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
+export const cloudAgentsPresetsCreateBodyRepositoriesItemInitialBranchMax = 255
 
-export const cloudAgentsProfilesCreateBodyModelMax = 100
+export const cloudAgentsPresetsCreateBodyModelMax = 100
 
-export const cloudAgentsProfilesCreateBodyInstructionsMax = 20000
+export const cloudAgentsPresetsCreateBodyInstructionsMax = 20000
 
-export const cloudAgentsProfilesCreateBodyMaxDurationMinutesMin = 5
-export const cloudAgentsProfilesCreateBodyMaxDurationMinutesMax = 240
+export const cloudAgentsPresetsCreateBodyIdleMinutesMax = 120
 
-export const cloudAgentsProfilesCreateBodyMaxCostUsdRegExp = new RegExp('^-?\\d{0,8}(?:\\.\\d{0,2})?$')
-export const cloudAgentsProfilesCreateBodyDescriptionMax = 2000
+export const cloudAgentsPresetsCreateBodyDescriptionMax = 2000
 
-export const cloudAgentsProfilesCreateBodyTagsItemMax = 50
+export const cloudAgentsPresetsCreateBodyTagsItemMax = 50
 
-export const cloudAgentsProfilesCreateBodyTagsMax = 20
+export const cloudAgentsPresetsCreateBodyTagsMax = 20
 
-export const cloudAgentsProfilesCreateBodyNameMax = 100
+export const cloudAgentsPresetsCreateBodyNameMax = 100
 
-export const CloudAgentsProfilesCreateBody = /* @__PURE__ */ zod
+export const CloudAgentsPresetsCreateBody = /* @__PURE__ */ zod
     .object({
-        repository: zod
-            .string()
-            .max(cloudAgentsProfilesCreateBodyRepositoryMax)
-            .regex(cloudAgentsProfilesCreateBodyRepositoryRegExp)
+        repositories: zod
+            .array(
+                zod.object({
+                    name: zod
+                        .string()
+                        .max(cloudAgentsPresetsCreateBodyRepositoriesItemNameMax)
+                        .regex(cloudAgentsPresetsCreateBodyRepositoriesItemNameRegExp)
+                        .describe('GitHub repository, in the format `owner\/name`.'),
+                    initial_branch: zod
+                        .string()
+                        .max(cloudAgentsPresetsCreateBodyRepositoriesItemInitialBranchMax)
+                        .nullish()
+                        .describe('Branch that the agent starts from. Null uses the default branch of the repository.'),
+                })
+            )
             .nullish()
-            .describe('Default GitHub repository, in the format `owner\/name`. Null sets no default.'),
-        branch: zod
-            .string()
-            .max(cloudAgentsProfilesCreateBodyBranchMax)
-            .nullish()
-            .describe('Default base branch. Null uses the default branch of the repository.'),
+            .describe(
+                'Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.'
+            ),
         model: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyModelMax)
+            .max(cloudAgentsPresetsCreateBodyModelMax)
             .nullish()
             .describe('Default model for the agent. Null lets PostHog select the model.'),
+        reasoning_effort: zod
+            .union([
+                zod
+                    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
+                    .describe(
+                        '\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+                    ),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.\n\n\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+            ),
         size: zod
             .union([
                 zod
@@ -78,93 +97,110 @@ export const CloudAgentsProfilesCreateBody = /* @__PURE__ */ zod
             ),
         instructions: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyInstructionsMax)
+            .max(cloudAgentsPresetsCreateBodyInstructionsMax)
             .nullish()
             .describe(
-                'Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.'
+                'Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.'
             ),
         create_pr: zod
             .boolean()
             .nullish()
             .describe('Whether the agent opens a pull request when it finishes. Null uses the product default.'),
-        pr_mode: zod
-            .union([zod.enum(['draft', 'ready']).describe('\* `draft` - Draft\n\* `ready` - Ready'), zod.null()])
-            .optional()
-            .describe(
-                'Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.\n\n\* `draft` - Draft\n\* `ready` - Ready'
-            ),
-        max_duration_minutes: zod
+        idle_minutes: zod
             .number()
-            .min(cloudAgentsProfilesCreateBodyMaxDurationMinutesMin)
-            .max(cloudAgentsProfilesCreateBodyMaxDurationMinutesMax)
+            .min(1)
+            .max(cloudAgentsPresetsCreateBodyIdleMinutesMax)
             .nullish()
             .describe(
-                'The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.'
+                'How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.'
             ),
-        max_cost_usd: zod
-            .stringFormat('decimal', cloudAgentsProfilesCreateBodyMaxCostUsdRegExp)
+        output_schema: zod
+            .record(zod.string(), zod.unknown())
             .nullish()
-            .describe('Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.'),
+            .describe(
+                'A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.'
+            ),
         description: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyDescriptionMax)
+            .max(cloudAgentsPresetsCreateBodyDescriptionMax)
             .optional()
-            .describe('What this profile is for.'),
+            .describe('What this preset is for.'),
         tags: zod
-            .array(zod.string().max(cloudAgentsProfilesCreateBodyTagsItemMax))
-            .max(cloudAgentsProfilesCreateBodyTagsMax)
+            .array(zod.string().max(cloudAgentsPresetsCreateBodyTagsItemMax))
+            .max(cloudAgentsPresetsCreateBodyTagsMax)
             .optional()
-            .describe('Tags added to every run that uses this profile.'),
+            .describe('Tags added to every run that uses this preset.'),
         name: zod
             .string()
-            .max(cloudAgentsProfilesCreateBodyNameMax)
-            .describe('Name of the profile. It is unique in the project, without regard to case.'),
+            .max(cloudAgentsPresetsCreateBodyNameMax)
+            .describe('Name of the preset. It is unique in the project, without regard to case.'),
     })
-    .describe('The run defaults that a profile and the project settings share. A null value sets no default.')
+    .describe('The run defaults that a preset and the project settings share. A null value sets no default.')
 
 /**
  * Only the fields in the request change. A null value clears a default.
- * @summary Update a profile
+ * @summary Update a preset
  */
-export const cloudAgentsProfilesPartialUpdateBodyRepositoryMax = 255
+export const cloudAgentsPresetsPartialUpdateBodyRepositoriesItemNameMax = 255
 
-export const cloudAgentsProfilesPartialUpdateBodyRepositoryRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
-export const cloudAgentsProfilesPartialUpdateBodyBranchMax = 255
+export const cloudAgentsPresetsPartialUpdateBodyRepositoriesItemNameRegExp = new RegExp(
+    '^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$'
+)
+export const cloudAgentsPresetsPartialUpdateBodyRepositoriesItemInitialBranchMax = 255
 
-export const cloudAgentsProfilesPartialUpdateBodyModelMax = 100
+export const cloudAgentsPresetsPartialUpdateBodyModelMax = 100
 
-export const cloudAgentsProfilesPartialUpdateBodyInstructionsMax = 20000
+export const cloudAgentsPresetsPartialUpdateBodyInstructionsMax = 20000
 
-export const cloudAgentsProfilesPartialUpdateBodyMaxDurationMinutesMin = 5
-export const cloudAgentsProfilesPartialUpdateBodyMaxDurationMinutesMax = 240
+export const cloudAgentsPresetsPartialUpdateBodyIdleMinutesMax = 120
 
-export const cloudAgentsProfilesPartialUpdateBodyMaxCostUsdRegExp = new RegExp('^-?\\d{0,8}(?:\\.\\d{0,2})?$')
-export const cloudAgentsProfilesPartialUpdateBodyDescriptionMax = 2000
+export const cloudAgentsPresetsPartialUpdateBodyDescriptionMax = 2000
 
-export const cloudAgentsProfilesPartialUpdateBodyTagsItemMax = 50
+export const cloudAgentsPresetsPartialUpdateBodyTagsItemMax = 50
 
-export const cloudAgentsProfilesPartialUpdateBodyTagsMax = 20
+export const cloudAgentsPresetsPartialUpdateBodyTagsMax = 20
 
-export const cloudAgentsProfilesPartialUpdateBodyNameMax = 100
+export const cloudAgentsPresetsPartialUpdateBodyNameMax = 100
 
-export const CloudAgentsProfilesPartialUpdateBody = /* @__PURE__ */ zod
+export const CloudAgentsPresetsPartialUpdateBody = /* @__PURE__ */ zod
     .object({
-        repository: zod
-            .string()
-            .max(cloudAgentsProfilesPartialUpdateBodyRepositoryMax)
-            .regex(cloudAgentsProfilesPartialUpdateBodyRepositoryRegExp)
+        repositories: zod
+            .array(
+                zod.object({
+                    name: zod
+                        .string()
+                        .max(cloudAgentsPresetsPartialUpdateBodyRepositoriesItemNameMax)
+                        .regex(cloudAgentsPresetsPartialUpdateBodyRepositoriesItemNameRegExp)
+                        .describe('GitHub repository, in the format `owner\/name`.'),
+                    initial_branch: zod
+                        .string()
+                        .max(cloudAgentsPresetsPartialUpdateBodyRepositoriesItemInitialBranchMax)
+                        .nullish()
+                        .describe('Branch that the agent starts from. Null uses the default branch of the repository.'),
+                })
+            )
             .nullish()
-            .describe('Default GitHub repository, in the format `owner\/name`. Null sets no default.'),
-        branch: zod
-            .string()
-            .max(cloudAgentsProfilesPartialUpdateBodyBranchMax)
-            .nullish()
-            .describe('Default base branch. Null uses the default branch of the repository.'),
+            .describe(
+                'Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.'
+            ),
         model: zod
             .string()
-            .max(cloudAgentsProfilesPartialUpdateBodyModelMax)
+            .max(cloudAgentsPresetsPartialUpdateBodyModelMax)
             .nullish()
             .describe('Default model for the agent. Null lets PostHog select the model.'),
+        reasoning_effort: zod
+            .union([
+                zod
+                    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
+                    .describe(
+                        '\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+                    ),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.\n\n\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+            ),
         size: zod
             .union([
                 zod
@@ -191,71 +227,65 @@ export const CloudAgentsProfilesPartialUpdateBody = /* @__PURE__ */ zod
             ),
         instructions: zod
             .string()
-            .max(cloudAgentsProfilesPartialUpdateBodyInstructionsMax)
+            .max(cloudAgentsPresetsPartialUpdateBodyInstructionsMax)
             .nullish()
             .describe(
-                'Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.'
+                'Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.'
             ),
         create_pr: zod
             .boolean()
             .nullish()
             .describe('Whether the agent opens a pull request when it finishes. Null uses the product default.'),
-        pr_mode: zod
-            .union([zod.enum(['draft', 'ready']).describe('\* `draft` - Draft\n\* `ready` - Ready'), zod.null()])
-            .optional()
-            .describe(
-                'Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.\n\n\* `draft` - Draft\n\* `ready` - Ready'
-            ),
-        max_duration_minutes: zod
+        idle_minutes: zod
             .number()
-            .min(cloudAgentsProfilesPartialUpdateBodyMaxDurationMinutesMin)
-            .max(cloudAgentsProfilesPartialUpdateBodyMaxDurationMinutesMax)
+            .min(1)
+            .max(cloudAgentsPresetsPartialUpdateBodyIdleMinutesMax)
             .nullish()
             .describe(
-                'The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.'
+                'How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.'
             ),
-        max_cost_usd: zod
-            .stringFormat('decimal', cloudAgentsProfilesPartialUpdateBodyMaxCostUsdRegExp)
+        output_schema: zod
+            .record(zod.string(), zod.unknown())
             .nullish()
-            .describe('Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.'),
+            .describe(
+                'A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.'
+            ),
         description: zod
             .string()
-            .max(cloudAgentsProfilesPartialUpdateBodyDescriptionMax)
+            .max(cloudAgentsPresetsPartialUpdateBodyDescriptionMax)
             .optional()
-            .describe('What this profile is for.'),
+            .describe('What this preset is for.'),
         tags: zod
-            .array(zod.string().max(cloudAgentsProfilesPartialUpdateBodyTagsItemMax))
-            .max(cloudAgentsProfilesPartialUpdateBodyTagsMax)
+            .array(zod.string().max(cloudAgentsPresetsPartialUpdateBodyTagsItemMax))
+            .max(cloudAgentsPresetsPartialUpdateBodyTagsMax)
             .optional()
-            .describe('Tags added to every run that uses this profile.'),
+            .describe('Tags added to every run that uses this preset.'),
         name: zod
             .string()
-            .max(cloudAgentsProfilesPartialUpdateBodyNameMax)
+            .max(cloudAgentsPresetsPartialUpdateBodyNameMax)
             .optional()
-            .describe('Name of the profile. It is unique in the project, without regard to case.'),
+            .describe('Name of the preset. It is unique in the project, without regard to case.'),
     })
-    .describe('The run defaults that a profile and the project settings share. A null value sets no default.')
+    .describe('The run defaults that a preset and the project settings share. A null value sets no default.')
 
 /**
  * Starts a sandbox with a coding agent that works on the prompt in the repository. The response returns at once with a `queued` run. Read the run or stream its events to follow it. Send the same `Idempotency-Key` header again to get the same run and not a second one.
  * @summary Start a run
  */
-export const cloudAgentsRunsCreateBodyRepositoryMax = 255
+export const cloudAgentsRunsCreateBodyRepositoriesItemNameMax = 255
 
-export const cloudAgentsRunsCreateBodyRepositoryRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
-export const cloudAgentsRunsCreateBodyBranchMax = 255
+export const cloudAgentsRunsCreateBodyRepositoriesItemNameRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
+export const cloudAgentsRunsCreateBodyRepositoriesItemInitialBranchMax = 255
 
 export const cloudAgentsRunsCreateBodyModelMax = 100
 
 export const cloudAgentsRunsCreateBodyInstructionsMax = 20000
 
-export const cloudAgentsRunsCreateBodyMaxDurationMinutesMin = 5
-export const cloudAgentsRunsCreateBodyMaxDurationMinutesMax = 240
+export const cloudAgentsRunsCreateBodyIdleMinutesMax = 120
 
-export const cloudAgentsRunsCreateBodyMaxCostUsdRegExp = new RegExp('^-?\\d{0,8}(?:\\.\\d{0,2})?$')
 export const cloudAgentsRunsCreateBodyPromptMax = 64000
 
-export const cloudAgentsRunsCreateBodyProfileMax = 100
+export const cloudAgentsRunsCreateBodyPresetMax = 100
 
 export const cloudAgentsRunsCreateBodyTagsItemMax = 50
 
@@ -265,24 +295,43 @@ export const cloudAgentsRunsCreateBodyMetadataMaxOne = 512
 
 export const CloudAgentsRunsCreateBody = /* @__PURE__ */ zod
     .object({
-        repository: zod
-            .string()
-            .max(cloudAgentsRunsCreateBodyRepositoryMax)
-            .regex(cloudAgentsRunsCreateBodyRepositoryRegExp)
+        repositories: zod
+            .array(
+                zod.object({
+                    name: zod
+                        .string()
+                        .max(cloudAgentsRunsCreateBodyRepositoriesItemNameMax)
+                        .regex(cloudAgentsRunsCreateBodyRepositoriesItemNameRegExp)
+                        .describe('GitHub repository, in the format `owner\/name`.'),
+                    initial_branch: zod
+                        .string()
+                        .max(cloudAgentsRunsCreateBodyRepositoriesItemInitialBranchMax)
+                        .nullish()
+                        .describe('Branch that the agent starts from. Null uses the default branch of the repository.'),
+                })
+            )
             .nullish()
             .describe(
-                'GitHub repository that the agent works in, in the format `owner\/name`. Required unless the profile or the project settings set a default.'
+                'The repositories that the agent works in. Only one repository is supported for now. Required unless the preset or the project settings set a default.'
             ),
-        branch: zod
-            .string()
-            .max(cloudAgentsRunsCreateBodyBranchMax)
-            .nullish()
-            .describe('Default base branch. Null uses the default branch of the repository.'),
         model: zod
             .string()
             .max(cloudAgentsRunsCreateBodyModelMax)
             .nullish()
             .describe('Default model for the agent. Null lets PostHog select the model.'),
+        reasoning_effort: zod
+            .union([
+                zod
+                    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
+                    .describe(
+                        '\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+                    ),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.\n\n\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+            ),
         size: zod
             .union([
                 zod
@@ -312,46 +361,42 @@ export const CloudAgentsRunsCreateBody = /* @__PURE__ */ zod
             .max(cloudAgentsRunsCreateBodyInstructionsMax)
             .nullish()
             .describe(
-                'Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.'
+                'Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.'
             ),
         create_pr: zod
             .boolean()
             .nullish()
             .describe('Whether the agent opens a pull request when it finishes. Null uses the product default.'),
-        pr_mode: zod
-            .union([zod.enum(['draft', 'ready']).describe('\* `draft` - Draft\n\* `ready` - Ready'), zod.null()])
-            .optional()
-            .describe(
-                'Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.\n\n\* `draft` - Draft\n\* `ready` - Ready'
-            ),
-        max_duration_minutes: zod
+        idle_minutes: zod
             .number()
-            .min(cloudAgentsRunsCreateBodyMaxDurationMinutesMin)
-            .max(cloudAgentsRunsCreateBodyMaxDurationMinutesMax)
+            .min(1)
+            .max(cloudAgentsRunsCreateBodyIdleMinutesMax)
             .nullish()
             .describe(
-                'The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.'
+                'How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.'
             ),
-        max_cost_usd: zod
-            .stringFormat('decimal', cloudAgentsRunsCreateBodyMaxCostUsdRegExp)
+        output_schema: zod
+            .record(zod.string(), zod.unknown())
             .nullish()
-            .describe('Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.'),
+            .describe(
+                'A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.'
+            ),
         prompt: zod
             .string()
             .max(cloudAgentsRunsCreateBodyPromptMax)
             .describe('The task for the agent, in plain language.'),
-        profile: zod
+        preset: zod
             .string()
-            .max(cloudAgentsRunsCreateBodyProfileMax)
+            .max(cloudAgentsRunsCreateBodyPresetMax)
             .nullish()
             .describe(
-                'ID or name of the profile whose defaults the run uses. Null uses the default profile of the project, when one is set.'
+                'ID or name of the preset whose defaults the run uses. Null uses the default preset of the project, when one is set.'
             ),
         tags: zod
             .array(zod.string().max(cloudAgentsRunsCreateBodyTagsItemMax))
             .max(cloudAgentsRunsCreateBodyTagsMax)
             .optional()
-            .describe('Tags for the run. The tags of the profile are added to them.'),
+            .describe('Tags for the run. The tags of the preset are added to them.'),
         metadata: zod
             .record(zod.string(), zod.string().max(cloudAgentsRunsCreateBodyMetadataMaxOne))
             .optional()
@@ -359,10 +404,10 @@ export const CloudAgentsRunsCreateBody = /* @__PURE__ */ zod
                 'Your own key and value pairs, stored with the run and returned with it. At most 16 pairs. Keys and values are strings.'
             ),
     })
-    .describe('The run defaults that a profile and the project settings share. A null value sets no default.')
+    .describe('The run defaults that a preset and the project settings share. A null value sets no default.')
 
 /**
- * Sends a follow-up message. An agent that is at work gets the message in its current session. A run that stopped starts a new agent session with the message and goes back to `queued`.
+ * Sends a follow-up message. An agent that is at work gets the message in its current session. An `idle` run starts a new agent session with the message and goes back to `queued`. A `done` run refuses the message with status 409 and the code `run_done`.
  * @summary Send a message to a run
  */
 export const cloudAgentsRunsMessagesCreateBodyContentMax = 64000
@@ -378,38 +423,58 @@ export const CloudAgentsRunsMessagesCreateBody = /* @__PURE__ */ zod.object({
  * Only the fields in the request change. A null value clears a default.
  * @summary Update cloud agent settings
  */
-export const cloudAgentsSettingsPartialUpdateBodyRepositoryMax = 255
+export const cloudAgentsSettingsPartialUpdateBodyRepositoriesItemNameMax = 255
 
-export const cloudAgentsSettingsPartialUpdateBodyRepositoryRegExp = new RegExp('^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$')
-export const cloudAgentsSettingsPartialUpdateBodyBranchMax = 255
+export const cloudAgentsSettingsPartialUpdateBodyRepositoriesItemNameRegExp = new RegExp(
+    '^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$'
+)
+export const cloudAgentsSettingsPartialUpdateBodyRepositoriesItemInitialBranchMax = 255
 
 export const cloudAgentsSettingsPartialUpdateBodyModelMax = 100
 
 export const cloudAgentsSettingsPartialUpdateBodyInstructionsMax = 20000
 
-export const cloudAgentsSettingsPartialUpdateBodyMaxDurationMinutesMin = 5
-export const cloudAgentsSettingsPartialUpdateBodyMaxDurationMinutesMax = 240
-
-export const cloudAgentsSettingsPartialUpdateBodyMaxCostUsdRegExp = new RegExp('^-?\\d{0,8}(?:\\.\\d{0,2})?$')
+export const cloudAgentsSettingsPartialUpdateBodyIdleMinutesMax = 120
 
 export const CloudAgentsSettingsPartialUpdateBody = /* @__PURE__ */ zod
     .object({
-        repository: zod
-            .string()
-            .max(cloudAgentsSettingsPartialUpdateBodyRepositoryMax)
-            .regex(cloudAgentsSettingsPartialUpdateBodyRepositoryRegExp)
+        repositories: zod
+            .array(
+                zod.object({
+                    name: zod
+                        .string()
+                        .max(cloudAgentsSettingsPartialUpdateBodyRepositoriesItemNameMax)
+                        .regex(cloudAgentsSettingsPartialUpdateBodyRepositoriesItemNameRegExp)
+                        .describe('GitHub repository, in the format `owner\/name`.'),
+                    initial_branch: zod
+                        .string()
+                        .max(cloudAgentsSettingsPartialUpdateBodyRepositoriesItemInitialBranchMax)
+                        .nullish()
+                        .describe('Branch that the agent starts from. Null uses the default branch of the repository.'),
+                })
+            )
             .nullish()
-            .describe('Default GitHub repository, in the format `owner\/name`. Null sets no default.'),
-        branch: zod
-            .string()
-            .max(cloudAgentsSettingsPartialUpdateBodyBranchMax)
-            .nullish()
-            .describe('Default base branch. Null uses the default branch of the repository.'),
+            .describe(
+                'Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.'
+            ),
         model: zod
             .string()
             .max(cloudAgentsSettingsPartialUpdateBodyModelMax)
             .nullish()
             .describe('Default model for the agent. Null lets PostHog select the model.'),
+        reasoning_effort: zod
+            .union([
+                zod
+                    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
+                    .describe(
+                        '\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+                    ),
+                zod.null(),
+            ])
+            .optional()
+            .describe(
+                'How much the model reasons before it answers. A model supports only some of the values. Null uses the default of the model.\n\n\* `low` - Low\n\* `medium` - Medium\n\* `high` - High\n\* `xhigh` - Extra high\n\* `max` - Max\n\* `ultracode` - Ultracode'
+            ),
         size: zod
             .union([
                 zod
@@ -439,33 +504,29 @@ export const CloudAgentsSettingsPartialUpdateBody = /* @__PURE__ */ zod
             .max(cloudAgentsSettingsPartialUpdateBodyInstructionsMax)
             .nullish()
             .describe(
-                'Instructions that the agent gets before the prompt. Project instructions come first, then profile instructions, then the instructions of the run.'
+                'Instructions that the agent gets before the prompt. Project instructions come first, then preset instructions, then the instructions of the run.'
             ),
         create_pr: zod
             .boolean()
             .nullish()
             .describe('Whether the agent opens a pull request when it finishes. Null uses the product default.'),
-        pr_mode: zod
-            .union([zod.enum(['draft', 'ready']).describe('\* `draft` - Draft\n\* `ready` - Ready'), zod.null()])
-            .optional()
-            .describe(
-                'Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. Null uses the product default.\n\n\* `draft` - Draft\n\* `ready` - Ready'
-            ),
-        max_duration_minutes: zod
+        idle_minutes: zod
             .number()
-            .min(cloudAgentsSettingsPartialUpdateBodyMaxDurationMinutesMin)
-            .max(cloudAgentsSettingsPartialUpdateBodyMaxDurationMinutesMax)
+            .min(1)
+            .max(cloudAgentsSettingsPartialUpdateBodyIdleMinutesMax)
             .nullish()
             .describe(
-                'The run time limit in minutes, from 5 to 240. Reserved. Not enforced yet. Null uses the product default.'
+                'How many minutes the sandbox waits with no activity before it stops, from 1 to 120. The run is then `idle`, and a message continues it. While the agent is in the middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10.'
             ),
-        max_cost_usd: zod
-            .stringFormat('decimal', cloudAgentsSettingsPartialUpdateBodyMaxCostUsdRegExp)
+        output_schema: zod
+            .record(zod.string(), zod.unknown())
             .nullish()
-            .describe('Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.'),
-        default_profile: zod
+            .describe(
+                'A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that matches it, and the run returns the result in `result.output`. Null asks for no structured result.'
+            ),
+        default_preset: zod
             .uuid()
             .nullish()
-            .describe('ID of the profile that a run uses when it names no profile. Null sets no default profile.'),
+            .describe('ID of the preset that a run uses when it names no preset. Null sets no default preset.'),
     })
-    .describe('The run defaults that a profile and the project settings share. A null value sets no default.')
+    .describe('The run defaults that a preset and the project settings share. A null value sets no default.')

@@ -13,6 +13,7 @@ from parameterized import parameterized
 from posthog.models import Integration, Team
 from posthog.models.user import User
 
+from products.tasks.backend.constants import COMPUTE_WAIVED_REASON_STATE_KEY
 from products.tasks.backend.exceptions import COMPUTE_USAGE_LIMIT_ERROR_MESSAGE, ComputeBillingLimitError
 from products.tasks.backend.facade import (
     api as facade,
@@ -29,6 +30,9 @@ from products.tasks.backend.temporal.process_task.activities.get_task_processing
     _is_burstable_sandbox_resources_enabled,
 )
 from products.tasks.backend.visibility import task_visibility_q
+
+PR_A = "https://github.com/acme/app/pull/7"
+PR_B = "https://github.com/acme/app/pull/8"
 
 
 def _run_dto(status: str, *, error_message: str | None = None, state: dict | None = None) -> contracts.TaskRunDTO:
@@ -158,10 +162,12 @@ class TestCloudAgentTasks(BaseTest):
         )
 
     def test_create_stamps_a_reserved_internal_background_task(self) -> None:
-        created = self._create(create_pr=False)
+        schema = {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}
+        created = self._create(create_pr=False, output_schema=schema)
 
         task = Task.objects.get(id=created.task_id)
         assert created.created is True
+        assert task.json_schema == schema
         assert created.run is not None
         assert (task.origin_product, task.internal, task.channel_id) == (Task.OriginProduct.CLOUD_AGENTS, True, None)
         assert (created.run.mode, created.run.status) == ("background", TaskRun.Status.QUEUED)
@@ -260,9 +266,15 @@ class TestCloudAgentTasks(BaseTest):
         [
             ("model_of_another_runtime", {"model": "gpt-5.5", "runtime_adapter": "claude"}),
             ("unknown_runtime", {"runtime_adapter": "not-a-runtime"}),
+            ("reasoning_effort_that_the_model_does_not_have", {"reasoning_effort": "not-an-effort"}),
+            ("output_schema_of_a_string", {"output_schema": {"type": "string"}}),
+            (
+                "output_schema_with_a_name_that_tasks_writes",
+                {"output_schema": {"type": "object", "properties": {"pr_merged": {"type": "boolean"}}}},
+            ),
         ]
     )
-    def test_invalid_model_selection_creates_nothing(self, _name: str, overrides: dict[str, Any]) -> None:
+    def test_invalid_request_creates_nothing(self, _name: str, overrides: dict[str, Any]) -> None:
         with self.assertRaises(cloud_agents.CloudAgentTaskInvalid):
             self._create(**overrides)
 
@@ -588,6 +600,88 @@ class TestCloudAgentTaskReads(BaseTest):
         assert cancelled.pr_urls == ("https://github.com/acme/app/pull/7", "https://github.com/acme/app/pull/8")
         # The second run left the queue with no sandbox on record, so its own creation time is its start.
         assert cancelled.sessions[1].started_at == second.created_at
+
+    @parameterized.expand(
+        [
+            ("no_output", None, {}, [(PR_A, "open"), (PR_B, None)], False, {"answer": "first"}),
+            (
+                "state_from_the_webhook",
+                {"pr_url": PR_A, "pr_state": "closed"},
+                {},
+                [(PR_A, "closed"), (PR_B, None)],
+                False,
+                {"answer": "first"},
+            ),
+            (
+                "merged_flag",
+                {"pr_url": PR_A, "pr_merged": True},
+                {},
+                [(PR_A, "merged"), (PR_B, None)],
+                False,
+                {"answer": "first"},
+            ),
+            (
+                "unknown_state_text",
+                {"pr_url": PR_A, "pr_state": "weird"},
+                {},
+                [(PR_A, "open"), (PR_B, None)],
+                False,
+                {"answer": "first"},
+            ),
+            (
+                "new_primary_pull_request",
+                {"pr_url": PR_B, "pr_state": "draft"},
+                {},
+                [(PR_A, "open"), (PR_B, "draft")],
+                False,
+                {"answer": "first"},
+            ),
+            (
+                "new_result_and_the_fields_that_tasks_writes",
+                {"answer": "second", "final_message": "Done", "pr_summaries": {}, "ci_status": "passing"},
+                {},
+                [(PR_A, "open"), (PR_B, None)],
+                False,
+                {"answer": "second"},
+            ),
+            (
+                "waived",
+                None,
+                {COMPUTE_WAIVED_REASON_STATE_KEY: "SandboxProvisionError"},
+                [(PR_A, "open"), (PR_B, None)],
+                True,
+                {"answer": "first"},
+            ),
+        ]
+    )
+    def test_state_reports_pull_request_states_the_waiver_and_the_agent_result(
+        self,
+        _name: str,
+        latest_output: dict[str, Any] | None,
+        latest_state: dict[str, Any],
+        pull_requests: list[tuple[str, str | None]],
+        waived: bool,
+        structured_output: dict[str, Any],
+    ) -> None:
+        start = timezone.now() - timedelta(hours=2)
+        task = self._task()
+        self._run(
+            task,
+            TaskRun.Status.COMPLETED,
+            created_at=start,
+            output={"pr_url": PR_A, "pr_urls": [PR_A, PR_B], "pr_state": "open", "answer": "first"},
+            # A waiver of an earlier run does not describe the latest run.
+            state={COMPUTE_WAIVED_REASON_STATE_KEY: "SandboxProvisionError"} if not waived else {},
+        )
+        self._run(
+            task, TaskRun.Status.FAILED, created_at=start + timedelta(hours=1), output=latest_output, state=latest_state
+        )
+
+        state = self._state(task)
+
+        assert [(pull_request.url, pull_request.state) for pull_request in state.pull_requests] == pull_requests
+        assert state.compute_waived is waived
+        assert state.structured_output == structured_output
 
     def test_reads_do_not_find_a_task_of_another_origin_or_another_team(self) -> None:
         other_team = Team.objects.create(organization=self.organization, name="Other team")

@@ -14,20 +14,42 @@ from posthog.enums import LabeledStrEnum
 
 
 class CloudAgentRunStatus(LabeledStrEnum):
+    """`idle` has no sandbox and continues with a message. `done` is final and refuses a message."""
+
     QUEUED = "queued"
     RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class StopReason(LabeledStrEnum):
+    IDLE = "idle"
     DONE = "done"
+
+
+class CloudAgentRunStatusReason(LabeledStrEnum):
+    """Why a run is `idle` or `done`."""
+
+    TURN_CLOSED = "turn_closed"
+    PROVISION_FAILED = "provision_failed"
+    UNEXPECTED_FAILURE = "unexpected_failure"
+    TIMED_OUT = "timed_out"
+    CREDIT_SPENT = "credit_spent"
+    FINISHED = "finished"
+    CLOSED = "closed"
     CANCELLED = "cancelled"
-    ERROR = "error"
-    TIMEOUT = "timeout"
-    BUDGET_EXCEEDED = "budget_exceeded"
-    USAGE_LIMIT = "usage_limit"
+
+
+class CloudAgentSessionStatus(LabeledStrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    ENDED = "ended"
+
+
+class CloudAgentReasoningEffort(LabeledStrEnum):
+    """The values that Tasks accepts. A model supports only some of them."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh", "Extra high"
+    MAX = "max"
+    ULTRACODE = "ultracode"
 
 
 class InferenceMode(LabeledStrEnum):
@@ -52,11 +74,6 @@ class CallerKind(LabeledStrEnum):
     INTERNAL = "internal"
 
 
-class PrMode(LabeledStrEnum):
-    DRAFT = "draft"
-    READY = "ready"
-
-
 class SizeName(LabeledStrEnum):
     """Sandbox sizes. The value is `<vCPU>x<memory in GiB>`."""
 
@@ -72,7 +89,7 @@ class SizeName(LabeledStrEnum):
 
 class UsageGroupBy(LabeledStrEnum):
     DAY = "day"
-    PROFILE = "profile"
+    PRESET = "preset"
 
 
 @frozen

@@ -15,6 +15,7 @@ from products.cloud_agents.backend.facade.enums import CallerKind
 from products.cloud_agents.backend.models import CloudAgentRun
 from products.tasks.backend.facade.cloud_agents import classify_task_run_end
 from products.tasks.backend.facade.contracts import (
+    CloudAgentPullRequestDTO,
     CloudAgentSessionDTO,
     CloudAgentTaskDTO,
     CloudAgentTaskStateDTO,
@@ -57,22 +58,22 @@ def caller_for(user: Any) -> CallerIdentity:
 
 LOGIC = "products.cloud_agents.backend.logic"
 RUN_CONFIG: dict[str, Any] = {
-    "repository": "acme/app",
-    "branch": None,
+    "repositories": [{"name": "acme/app", "initial_branch": None}],
     "model": "claude-test-model",
+    "reasoning_effort": None,
     "runtime_adapter": "claude",
     "size": "4x16",
     "inference": "posthog",
     "inference_requested": "auto",
     "instructions": None,
     "create_pr": True,
-    "pr_mode": "draft",
-    "max_duration_minutes": 60,
-    "max_cost_usd": None,
+    "idle_minutes": 10,
+    "output_schema": None,
     "tags": [],
-    "profile_id": None,
+    "preset_id": None,
 }
 TERMINAL_TASK_RUN_STATUSES = ("completed", "failed", "cancelled")
+PULL_REQUEST_OUTPUT_KEYS = ("pr_url", "pr_urls", "pr_state", "pr_merged")
 WAITING_TASK_RUN_STATUSES = ("not_started", "queued")
 
 
@@ -193,17 +194,25 @@ class TasksFacadeFake:
         latest = runs[-1] if runs else None
         pr_urls = tuple(dict.fromkeys(run.pr_url for run in runs if run.pr_url))
         cancel_source = latest.state.get("cancel_source") if latest is not None else None
+        pr_states = {run.pr_url: (run.output or {}).get("pr_state") for run in runs if run.pr_url}
+        outputs = [
+            {key: value for key, value in (run.output or {}).items() if key not in PULL_REQUEST_OUTPUT_KEYS}
+            for run in reversed(runs)
+        ]
         return CloudAgentTaskStateDTO(
             task_id=task_id,
             status=latest.status if latest is not None else "queued",
             run_end=classify_task_run_end(latest) if latest is not None and latest.is_terminal else None,
             cancel_source=cancel_source,
+            compute_waived=bool(latest is not None and latest.state.get("compute_waived_reason")),
             current_task_run_id=latest.id if latest is not None else None,
             started_at=next((session.started_at for session in sessions if session.started_at), None),
             completed_at=sessions[-1].ended_at if sessions else None,
             updated_at=latest.updated_at if latest is not None else None,
             pr_url=pr_urls[-1] if pr_urls else None,
             pr_urls=pr_urls,
+            pull_requests=tuple(CloudAgentPullRequestDTO(url=url, state=pr_states[url]) for url in pr_urls),
+            structured_output=next((output for output in outputs if output), None),
             summary=next((run.state["task_summary"] for run in reversed(runs) if run.state.get("task_summary")), None),
             sessions=sessions,
         )

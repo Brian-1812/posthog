@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_UP, Decimal
@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from posthog.dataclasses import frozen
 
+from products.tasks.backend.constants import COMPUTE_WAIVED_REASON_STATE_KEY
 from products.tasks.backend.models import SandboxSession
 
 
@@ -149,6 +150,11 @@ def get_compute_rate_card_catalog(
     )
     history = tuple(card for card in reversed(published_cards) if card != current)
     return ComputeRateCardCatalog(current=current, history=history)
+
+
+def compute_waived(product: ComputePricingProduct, run_state: Mapping[str, object] | None) -> bool:
+    """Whether the sandbox time of a run is waived. Only a Cloud Agents run can have a waiver."""
+    return product == "cloud_agents" and bool((run_state or {}).get(COMPUTE_WAIVED_REASON_STATE_KEY))
 
 
 def validate_reporting_window(reporting_start: datetime, reporting_end: datetime) -> None:

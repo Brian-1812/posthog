@@ -29,7 +29,7 @@ MAX_RUNS_IN_SUMMARY: Final = 2000
 
 
 @frozen
-class _Profile:
+class _Preset:
     id: UUID
     name: str
 
@@ -70,20 +70,19 @@ def _day_buckets(rows: tuple[CloudAgentTaskUsageDTO, ...]) -> list[UsageBucketDT
     return [UsageBucketDTO(key=day.isoformat(), label=None, usage=_totals(by_day[day])) for day in sorted(by_day)]
 
 
-def _profile_buckets(team_id: int, rows: tuple[CloudAgentTaskUsageDTO, ...]) -> list[UsageBucketDTO]:
-    profile_of_task: dict[UUID, _Profile | None] = {row.task_id: None for row in rows}
-    runs = CloudAgentRun.objects.for_team(team_id).filter(task_id__in=list(profile_of_task), profile__isnull=False)
-    for task_id, profile_id, profile_name in runs.values_list("task_id", "profile_id", "profile__name"):
-        profile_of_task[task_id] = _Profile(id=profile_id, name=profile_name)
-    by_profile = _grouped(rows, profile_of_task)
-    # The runs with no profile are the last bucket.
-    profiles = sorted((profile for profile in by_profile if profile is not None), key=lambda p: (p.name, str(p.id)))
+def _preset_buckets(team_id: int, rows: tuple[CloudAgentTaskUsageDTO, ...]) -> list[UsageBucketDTO]:
+    preset_of_task: dict[UUID, _Preset | None] = {row.task_id: None for row in rows}
+    runs = CloudAgentRun.objects.for_team(team_id).filter(task_id__in=list(preset_of_task), preset__isnull=False)
+    for task_id, preset_id, preset_name in runs.values_list("task_id", "preset_id", "preset__name"):
+        preset_of_task[task_id] = _Preset(id=preset_id, name=preset_name)
+    by_preset = _grouped(rows, preset_of_task)
+    # The runs with no preset are the last bucket.
+    presets = sorted((preset for preset in by_preset if preset is not None), key=lambda p: (p.name, str(p.id)))
     buckets = [
-        UsageBucketDTO(key=str(profile.id), label=profile.name, usage=_totals(by_profile[profile]))
-        for profile in profiles
+        UsageBucketDTO(key=str(preset.id), label=preset.name, usage=_totals(by_preset[preset])) for preset in presets
     ]
-    if None in by_profile:
-        buckets.append(UsageBucketDTO(key=None, label=None, usage=_totals(by_profile[None])))
+    if None in by_preset:
+        buckets.append(UsageBucketDTO(key=None, label=None, usage=_totals(by_preset[None])))
     return buckets
 
 
@@ -102,7 +101,7 @@ def get_usage_summary(
     )
     if usage.truncated:
         logger.warning("cloud_agents_usage_summary_truncated", team_id=team_id, limit=MAX_RUNS_IN_SUMMARY)
-    buckets = _day_buckets(usage.rows) if group_by == UsageGroupBy.DAY else _profile_buckets(team_id, usage.rows)
+    buckets = _day_buckets(usage.rows) if group_by == UsageGroupBy.DAY else _preset_buckets(team_id, usage.rows)
     return UsageSummaryDTO(
         date_from=date_from, date_to=date_to, group_by=group_by, totals=_totals(usage.rows), buckets=buckets
     )

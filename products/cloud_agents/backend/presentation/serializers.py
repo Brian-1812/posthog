@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from enum import Enum
 from typing import Any
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from ..facade.api import MAX_DURATION_MINUTES, MIN_DURATION_MINUTES
-from ..facade.contracts import RunDTO
+from ..facade.api import MAX_IDLE_MINUTES, MIN_IDLE_MINUTES
+from ..facade.contracts import RepositoryRef, RunDTO
 from ..facade.enums import (
     BillingMode,
     CallerKind,
+    CloudAgentReasoningEffort,
     CloudAgentRunStatus,
+    CloudAgentRunStatusReason,
+    CloudAgentSessionStatus,
     InferenceBilling,
     InferenceMode,
-    PrMode,
     SizeName,
-    StopReason,
     UsageGroupBy,
 )
 
@@ -56,27 +56,57 @@ def _tags_field(**kwargs: Any) -> serializers.ListField:
     )
 
 
-class RunDefaultsSerializer(serializers.Serializer):
-    """The run defaults that a profile and the project settings share. A null value sets no default."""
+@extend_schema_field({"type": "object", "additionalProperties": True})
+class JSONObjectField(serializers.JSONField):
+    """A JSON object with any keys, for example a JSON Schema."""
 
-    repository = serializers.RegexField(
-        REPOSITORY_REGEX,
-        max_length=255,
-        required=False,
-        allow_null=True,
-        help_text="Default GitHub repository, in the format `owner/name`. Null sets no default.",
+    default_error_messages = {"not_an_object": "This value must be a JSON object."}
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        value = super().to_internal_value(data)
+        if not isinstance(value, dict):
+            self.fail("not_an_object")
+        return value
+
+
+class CloudAgentRepositorySerializer(serializers.Serializer):
+    name = serializers.RegexField(
+        REPOSITORY_REGEX, max_length=255, help_text="GitHub repository, in the format `owner/name`."
     )
-    branch = serializers.CharField(
+    initial_branch = serializers.CharField(
         max_length=255,
         required=False,
         allow_null=True,
-        help_text="Default base branch. Null uses the default branch of the repository.",
+        help_text="Branch that the agent starts from. Null uses the default branch of the repository.",
+    )
+
+    def to_internal_value(self, data: Any) -> RepositoryRef:
+        return RepositoryRef(**super().to_internal_value(data))
+
+
+class RunDefaultsSerializer(serializers.Serializer):
+    """The run defaults that a preset and the project settings share. A null value sets no default."""
+
+    repositories = CloudAgentRepositorySerializer(
+        many=True,
+        required=False,
+        allow_null=True,
+        help_text="Default repositories that the agent works in. Only one repository is supported for now. Null sets no default.",
     )
     model = serializers.CharField(
         max_length=100,
         required=False,
         allow_null=True,
         help_text="Default model for the agent. Null lets PostHog select the model.",
+    )
+    reasoning_effort = LabeledEnumField(
+        CloudAgentReasoningEffort,
+        required=False,
+        allow_null=True,
+        help_text=(
+            "How much the model reasons before it answers. A model supports only some of the values. "
+            "Null uses the default of the model."
+        ),
     )
     size = LabeledEnumField(
         SizeName,
@@ -100,7 +130,7 @@ class RunDefaultsSerializer(serializers.Serializer):
         allow_blank=True,
         help_text=(
             "Instructions that the agent gets before the prompt. Project instructions come first, "
-            "then profile instructions, then the instructions of the run."
+            "then preset instructions, then the instructions of the run."
         ),
     )
     create_pr = serializers.BooleanField(
@@ -108,92 +138,74 @@ class RunDefaultsSerializer(serializers.Serializer):
         allow_null=True,
         help_text="Whether the agent opens a pull request when it finishes. Null uses the product default.",
     )
-    pr_mode = LabeledEnumField(
-        PrMode,
+    idle_minutes = serializers.IntegerField(
+        min_value=MIN_IDLE_MINUTES,
+        max_value=MAX_IDLE_MINUTES,
         required=False,
         allow_null=True,
         help_text=(
-            "Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet. "
-            "Null uses the product default."
+            f"How many minutes the sandbox waits with no activity before it stops, from {MIN_IDLE_MINUTES} to "
+            f"{MAX_IDLE_MINUTES}. The run is then `idle`, and a message continues it. While the agent is in the "
+            "middle of a turn, the sandbox waits 10 minutes at least. Null uses the product default, 10."
         ),
     )
-    max_duration_minutes = serializers.IntegerField(
-        min_value=MIN_DURATION_MINUTES,
-        max_value=MAX_DURATION_MINUTES,
+    output_schema = JSONObjectField(
         required=False,
         allow_null=True,
         help_text=(
-            f"The run time limit in minutes, from {MIN_DURATION_MINUTES} to {MAX_DURATION_MINUTES}. Reserved. Not enforced yet. "
-            "Null uses the product default."
+            "A JSON Schema with `type` set to `object`. When set, the agent must return a JSON result that "
+            "matches it, and the run returns the result in `result.output`. Null asks for no structured result."
         ),
     )
-    max_cost_usd = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        min_value=Decimal("0.01"),
-        required=False,
-        allow_null=True,
-        help_text="Cost limit of a run in US dollars. Reserved. Not enforced yet. Null sets no cost limit.",
-    )
-
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        errors = {
-            field: "This option is reserved and cannot be set until it is enforced."
-            for field in ("pr_mode", "max_duration_minutes", "max_cost_usd")
-            if attrs.get(field) is not None
-        }
-        if errors:
-            raise serializers.ValidationError(errors)
-        return attrs
 
 
-class ProfileWriteFieldsSerializer(RunDefaultsSerializer):
+class CloudAgentPresetWriteFieldsSerializer(RunDefaultsSerializer):
     description = serializers.CharField(
-        max_length=2000, required=False, allow_blank=True, help_text="What this profile is for."
+        max_length=2000, required=False, allow_blank=True, help_text="What this preset is for."
     )
-    tags = _tags_field(required=False, help_text="Tags added to every run that uses this profile.")
+    tags = _tags_field(required=False, help_text="Tags added to every run that uses this preset.")
 
 
-class ProfileCreateSerializer(ProfileWriteFieldsSerializer):
+class CloudAgentPresetCreateSerializer(CloudAgentPresetWriteFieldsSerializer):
     name = serializers.CharField(
         max_length=100,
-        help_text="Name of the profile. It is unique in the project, without regard to case.",
+        help_text="Name of the preset. It is unique in the project, without regard to case.",
     )
 
 
-class ProfileUpdateSerializer(ProfileWriteFieldsSerializer):
+class CloudAgentPresetUpdateSerializer(CloudAgentPresetWriteFieldsSerializer):
     name = serializers.CharField(
         max_length=100,
         required=False,
-        help_text="Name of the profile. It is unique in the project, without regard to case.",
+        help_text="Name of the preset. It is unique in the project, without regard to case.",
     )
 
 
-class ProfileSerializer(RunDefaultsSerializer):
-    id = serializers.UUIDField(help_text="ID of the profile.")
-    name = serializers.CharField(help_text="Name of the profile.")
-    description = serializers.CharField(allow_blank=True, help_text="What this profile is for.")
-    tags = _tags_field(help_text="Tags added to every run that uses this profile.")
+class CloudAgentPresetSerializer(RunDefaultsSerializer):
+    id = serializers.UUIDField(help_text="ID of the preset.")
+    name = serializers.CharField(help_text="Name of the preset.")
+    description = serializers.CharField(allow_blank=True, help_text="What this preset is for.")
+    tags = _tags_field(help_text="Tags added to every run that uses this preset.")
     created_by = serializers.IntegerField(
-        source="created_by_id", allow_null=True, help_text="ID of the user who created the profile."
+        source="created_by_id", allow_null=True, help_text="ID of the user who created the preset."
     )
-    created_at = serializers.DateTimeField(help_text="When the profile was created.")
-    updated_at = serializers.DateTimeField(help_text="When the profile was last changed.")
+    created_at = serializers.DateTimeField(help_text="When the preset was created.")
+    updated_at = serializers.DateTimeField(help_text="When the preset was last changed.")
 
 
 class CloudAgentSettingsUpdateSerializer(RunDefaultsSerializer):
-    default_profile = serializers.UUIDField(
+    default_preset = serializers.UUIDField(
         required=False,
         allow_null=True,
-        help_text="ID of the profile that a run uses when it names no profile. Null sets no default profile.",
+        help_text="ID of the preset that a run uses when it names no preset. Null sets no default preset.",
     )
 
 
 class CloudAgentSettingsSerializer(RunDefaultsSerializer):
-    default_profile = serializers.UUIDField(
-        source="default_profile_id",
+    default_preset = serializers.UUIDField(
+        source="default_preset_id",
         allow_null=True,
-        help_text="ID of the profile that a run uses when it names no profile.",
+        help_text="ID of the preset that a run uses when it names no preset.",
     )
     max_concurrent_runs = serializers.IntegerField(
         help_text="How many runs the project can have active at the same time."
@@ -210,26 +222,25 @@ class CloudAgentRunCreateSerializer(RunDefaultsSerializer):
         max_length=PROMPT_MAX_LENGTH,
         help_text="The task for the agent, in plain language.",
     )
-    repository = serializers.RegexField(
-        REPOSITORY_REGEX,
-        max_length=255,
+    repositories = CloudAgentRepositorySerializer(
+        many=True,
         required=False,
         allow_null=True,
         help_text=(
-            "GitHub repository that the agent works in, in the format `owner/name`. Required unless the "
-            "profile or the project settings set a default."
+            "The repositories that the agent works in. Only one repository is supported for now. Required "
+            "unless the preset or the project settings set a default."
         ),
     )
-    profile = serializers.CharField(
+    preset = serializers.CharField(
         max_length=100,
         required=False,
         allow_null=True,
         help_text=(
-            "ID or name of the profile whose defaults the run uses. Null uses the default profile of the "
+            "ID or name of the preset whose defaults the run uses. Null uses the default preset of the "
             "project, when one is set."
         ),
     )
-    tags = _tags_field(required=False, help_text="Tags for the run. The tags of the profile are added to them.")
+    tags = _tags_field(required=False, help_text="Tags for the run. The tags of the preset are added to them.")
     metadata = serializers.DictField(
         child=serializers.CharField(max_length=METADATA_VALUE_MAX_LENGTH, allow_blank=True),
         required=False,
@@ -254,8 +265,15 @@ class CloudAgentRunMessageSerializer(serializers.Serializer):
 
 
 class CloudAgentRunListQuerySerializer(serializers.Serializer):
-    status = LabeledEnumField(CloudAgentRunStatus, required=False, help_text="Return only the runs with this status.")
-    profile_id = serializers.UUIDField(required=False, help_text="Return only the runs that used this profile.")
+    status = LabeledEnumField(
+        CloudAgentRunStatus,
+        required=False,
+        help_text=(
+            "Return only the runs with this status. A status filter covers the newest 1,000 runs that are "
+            "active, for `queued` and `running`, or that have no agent at work, for `idle` and `done`."
+        ),
+    )
+    preset_id = serializers.UUIDField(required=False, help_text="Return only the runs that used this preset.")
     repository = serializers.CharField(
         max_length=255,
         required=False,
@@ -270,9 +288,9 @@ class CloudAgentRunListQuerySerializer(serializers.Serializer):
     )
 
 
-class CloudAgentRunProfileRefSerializer(serializers.Serializer):
-    id = serializers.UUIDField(source="profile_id", help_text="ID of the profile.")
-    name = serializers.CharField(source="profile_name", help_text="Name of the profile.")
+class CloudAgentRunPresetRefSerializer(serializers.Serializer):
+    id = serializers.UUIDField(source="preset_id", help_text="ID of the preset.")
+    name = serializers.CharField(source="preset_name", help_text="Name of the preset.")
 
 
 class CloudAgentSizeSerializer(serializers.Serializer):
@@ -291,6 +309,12 @@ class CloudAgentRunConfigSerializer(serializers.Serializer):
     """Reads a run: the stored configuration is in `config`, and the priced size is on the run."""
 
     model = serializers.CharField(source="config.model", allow_null=True, help_text="Model that the agent uses.")
+    reasoning_effort = LabeledEnumField(
+        CloudAgentReasoningEffort,
+        source="config.reasoning_effort",
+        allow_null=True,
+        help_text="How much the model reasons before it answers. Null uses the default of the model.",
+    )
     size = CloudAgentSizeSerializer(help_text="Sandbox size of the run. It is fixed for the life of the run.")
     inference = LabeledEnumField(
         InferenceMode,
@@ -303,23 +327,17 @@ class CloudAgentRunConfigSerializer(serializers.Serializer):
     create_pr = serializers.BooleanField(
         source="config.create_pr", help_text="Whether the agent opens a pull request when it finishes."
     )
-    pr_mode = LabeledEnumField(
-        PrMode,
-        source="config.pr_mode",
-        help_text="Whether the pull request opens as a draft or ready for review. Reserved. Not enforced yet.",
+    idle_minutes = serializers.IntegerField(
+        source="config.idle_minutes",
+        help_text="How many minutes the sandbox waits with no activity before it stops.",
     )
-    max_duration_minutes = serializers.IntegerField(
-        source="config.max_duration_minutes", help_text="Time limit of the run in minutes."
-    )
-    max_cost_usd = serializers.DecimalField(
-        source="config.max_cost_usd",
-        max_digits=10,
-        decimal_places=2,
+    output_schema = JSONObjectField(
+        source="config.output_schema",
         allow_null=True,
-        help_text="Cost limit of the run in US dollars. Reserved. Not enforced yet.",
+        help_text="The JSON Schema that the result of the agent must match. Null when the run has none.",
     )
     instructions_applied = serializers.SerializerMethodField(
-        help_text="Whether the agent got instructions from the run, its profile or the project settings."
+        help_text="Whether the agent got instructions from the run, its preset or the project settings."
     )
 
     @extend_schema_field(serializers.BooleanField())
@@ -333,6 +351,13 @@ class CloudAgentRunResultSerializer(serializers.Serializer):
         child=serializers.URLField(), help_text="URLs of all pull requests that the agent opened."
     )
     summary = serializers.CharField(allow_null=True, help_text="Summary of the work, written by the agent.")
+    output = JSONObjectField(
+        allow_null=True,
+        help_text=(
+            "The JSON result that the agent returned for the `output_schema` of the run. Null when the run "
+            "has no schema, or when the agent returned no result yet."
+        ),
+    )
 
 
 def _usd_field(help_text: str, **kwargs: Any) -> serializers.DecimalField:
@@ -372,7 +397,10 @@ class CloudAgentRunCostSerializer(serializers.Serializer):
 
 class CloudAgentAgentSessionSerializer(serializers.Serializer):
     index = serializers.IntegerField(help_text="Position of the session in the run, from 1.")
-    status = LabeledEnumField(CloudAgentRunStatus, help_text="Status of the session.")
+    status = LabeledEnumField(
+        CloudAgentSessionStatus,
+        help_text="`queued` waits for a sandbox, `running` has an agent at work, and `ended` has no sandbox.",
+    )
     started_at = serializers.DateTimeField(allow_null=True, help_text="When the agent started work in this session.")
     ended_at = serializers.DateTimeField(allow_null=True, help_text="When the session ended.")
 
@@ -387,34 +415,41 @@ class CloudAgentRunSerializer(serializers.Serializer):
     status = LabeledEnumField(
         CloudAgentRunStatus,
         help_text=(
-            "`queued` waits for a sandbox, `running` has an agent at work, and `completed`, `failed` and "
-            "`cancelled` are final until you send a new message."
+            "`queued` waits for a sandbox. `running` has an agent at work. `idle` has no sandbox, and a "
+            "message continues the run. `done` is final, and a message is refused."
         ),
     )
-    stop_reason = LabeledEnumField(
-        StopReason, allow_null=True, help_text="Why the run stopped. Null while the run is active."
+    status_reason = LabeledEnumField(
+        CloudAgentRunStatusReason,
+        allow_null=True,
+        help_text=(
+            "Why the run is `idle` or `done`. Null while the run is `queued` or `running`. An `idle` run has "
+            "`turn_closed` when the agent finished its turn, `timed_out`, `credit_spent`, `provision_failed` "
+            "or `unexpected_failure`. A `done` run has `finished` when its pull request was merged, `closed` "
+            "when every pull request was closed and not merged, or `cancelled`."
+        ),
     )
-    error = serializers.CharField(
-        allow_null=True, help_text="What went wrong and what to do next. Null when the run has no error."
+    status_detail = serializers.CharField(
+        allow_null=True,
+        help_text="What the status reason means for you and what to do next. Null when there is nothing to add.",
     )
     created_at = serializers.DateTimeField(help_text="When the run was created.")
     started_at = serializers.DateTimeField(allow_null=True, help_text="When the agent first started work.")
-    completed_at = serializers.DateTimeField(allow_null=True, help_text="When the run stopped.")
+    ended_at = serializers.DateTimeField(
+        allow_null=True, help_text="When the last agent session ended. Null while the run is `queued` or `running`."
+    )
     updated_at = serializers.DateTimeField(help_text="When the run last changed.")
     prompt = serializers.CharField(help_text="The task that the run started with.")
-    repository = serializers.CharField(help_text="GitHub repository of the run, in the format `owner/name`.")
-    branch = serializers.CharField(
-        allow_null=True, help_text="Base branch of the run. Null uses the default branch of the repository."
-    )
-    profile = serializers.SerializerMethodField(help_text="The profile that the run used. Null when it used none.")
+    repositories = CloudAgentRepositorySerializer(many=True, help_text="The repositories that the agent works in.")
+    preset = serializers.SerializerMethodField(help_text="The preset that the run used. Null when it used none.")
     config = CloudAgentRunConfigSerializer(source="*", help_text="The configuration that the run uses.")
     result = CloudAgentRunResultSerializer(help_text="What the agent produced.")
     cost = CloudAgentRunCostSerializer(help_text="What the run cost.")
     agent_sessions = CloudAgentAgentSessionSerializer(
         many=True,
-        help_text="The agent sessions of the run, oldest first. A message to a run that stopped starts a new session.",
+        help_text="The agent sessions of the run, oldest first. A message to an `idle` run starts a new session.",
     )
-    tags = _tags_field(help_text="Tags of the run, including the tags of its profile.")
+    tags = _tags_field(help_text="Tags of the run, including the tags of its preset.")
     metadata = serializers.DictField(
         child=serializers.CharField(allow_blank=True), help_text="Your own key and value pairs."
     )
@@ -427,9 +462,9 @@ class CloudAgentRunSerializer(serializers.Serializer):
         help_text="`api` for an API client, `app` for the PostHog app, `internal` for a PostHog product.",
     )
 
-    @extend_schema_field(CloudAgentRunProfileRefSerializer(allow_null=True))
-    def get_profile(self, run: RunDTO) -> Any:
-        return CloudAgentRunProfileRefSerializer(run).data if run.profile_id is not None else None
+    @extend_schema_field(CloudAgentRunPresetRefSerializer(allow_null=True))
+    def get_preset(self, run: RunDTO) -> Any:
+        return CloudAgentRunPresetRefSerializer(run).data if run.preset_id is not None else None
 
     @extend_schema_field(CloudAgentRunCreatedBySerializer(allow_null=True))
     def get_created_by(self, run: RunDTO) -> Any:
@@ -439,7 +474,7 @@ class CloudAgentRunSerializer(serializers.Serializer):
 class CloudAgentRunMessageResponseSerializer(serializers.Serializer):
     resumed = serializers.BooleanField(
         help_text=(
-            "True when the message started a new agent session, because the run had stopped. False when "
+            "True when the message started a new agent session, because the run was `idle`. False when "
             "the running agent got the message."
         )
     )
@@ -557,7 +592,7 @@ class CloudAgentUsageQuerySerializer(serializers.Serializer):
         UsageGroupBy,
         required=False,
         default=UsageGroupBy.DAY,
-        help_text="`day` gives one bucket for each UTC day. `profile` gives one bucket for each profile.",
+        help_text="`day` gives one bucket for each UTC day. `preset` gives one bucket for each preset.",
     )
 
 
@@ -576,12 +611,12 @@ class CloudAgentUsageBucketSerializer(serializers.Serializer):
     key = serializers.CharField(
         allow_null=True,
         help_text=(
-            "The UTC date of the bucket for `group_by=day`. The profile ID for `group_by=profile`, or null "
-            "for the runs that used no profile."
+            "The UTC date of the bucket for `group_by=day`. The preset ID for `group_by=preset`, or null "
+            "for the runs that used no preset."
         ),
     )
     name = serializers.CharField(
-        source="label", allow_null=True, help_text="Name of the profile for `group_by=profile`. Null for other buckets."
+        source="label", allow_null=True, help_text="Name of the preset for `group_by=preset`. Null for other buckets."
     )
     usage = CloudAgentUsageTotalsSerializer(help_text="Usage of the runs in this bucket.")
 
@@ -591,4 +626,4 @@ class CloudAgentUsageSummarySerializer(serializers.Serializer):
     date_to = serializers.DateTimeField(help_text="End of the range, not included.")
     group_by = LabeledEnumField(UsageGroupBy, help_text="How the buckets are grouped.")
     totals = CloudAgentUsageTotalsSerializer(help_text="Usage of all runs created in the range.")
-    buckets = CloudAgentUsageBucketSerializer(many=True, help_text="Usage for each day or for each profile.")
+    buckets = CloudAgentUsageBucketSerializer(many=True, help_text="Usage for each day or for each preset.")

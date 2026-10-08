@@ -43,28 +43,28 @@ const cloudAgentsEstimate = (): ToolBase<ReturnType<typeof CloudAgentsEstimateSc
     },
 })
 
-const CloudAgentsProfileCreateSchema = () => {
-    const CloudAgentsProfilesCreateBody = orvalSchemas.CloudAgentsProfilesCreateBody()
-    return CloudAgentsProfilesCreateBody
+const CloudAgentsPresetCreateSchema = () => {
+    const CloudAgentsPresetsCreateBody = orvalSchemas.CloudAgentsPresetsCreateBody()
+    return CloudAgentsPresetsCreateBody
 }
 
-const cloudAgentsProfileCreate = (): ToolBase<
-    ReturnType<typeof CloudAgentsProfileCreateSchema>,
-    WithPostHogUrl<Schemas.Profile>
+const cloudAgentsPresetCreate = (): ToolBase<
+    ReturnType<typeof CloudAgentsPresetCreateSchema>,
+    WithPostHogUrl<Schemas.CloudAgentPreset>
 > => ({
-    name: 'cloud-agents-profile-create',
-    schema: CloudAgentsProfileCreateSchema(),
-    handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsProfileCreateSchema>>) => {
+    name: 'cloud-agents-preset-create',
+    schema: CloudAgentsPresetCreateSchema(),
+    handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsPresetCreateSchema>>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.repository !== undefined) {
-            body['repository'] = params.repository
-        }
-        if (params.branch !== undefined) {
-            body['branch'] = params.branch
+        if (params.repositories !== undefined) {
+            body['repositories'] = params.repositories
         }
         if (params.model !== undefined) {
             body['model'] = params.model
+        }
+        if (params.reasoning_effort !== undefined) {
+            body['reasoning_effort'] = params.reasoning_effort
         }
         if (params.size !== undefined) {
             body['size'] = params.size
@@ -78,6 +78,12 @@ const cloudAgentsProfileCreate = (): ToolBase<
         if (params.create_pr !== undefined) {
             body['create_pr'] = params.create_pr
         }
+        if (params.idle_minutes !== undefined) {
+            body['idle_minutes'] = params.idle_minutes
+        }
+        if (params.output_schema !== undefined) {
+            body['output_schema'] = params.output_schema
+        }
         if (params.description !== undefined) {
             body['description'] = params.description
         }
@@ -87,56 +93,56 @@ const cloudAgentsProfileCreate = (): ToolBase<
         if (params.name !== undefined) {
             body['name'] = params.name
         }
-        const result = await context.api.request<Schemas.Profile>({
+        const result = await context.api.request<Schemas.CloudAgentPreset>({
             method: 'POST',
-            path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/profiles/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/presets/`,
             body,
         })
         return await withPostHogUrl(context, result, `/cloud-agents/profiles/${result.id}`)
     },
 })
 
-const CloudAgentsProfileGetSchema = () => {
-    const CloudAgentsProfilesRetrieveParams = orvalSchemas.CloudAgentsProfilesRetrieveParams()
-    return CloudAgentsProfilesRetrieveParams.omit({ project_id: true }).extend({
-        id: CloudAgentsProfilesRetrieveParams.shape['id'].describe(
+const CloudAgentsPresetGetSchema = () => {
+    const CloudAgentsPresetsRetrieveParams = orvalSchemas.CloudAgentsPresetsRetrieveParams()
+    return CloudAgentsPresetsRetrieveParams.omit({ project_id: true }).extend({
+        id: CloudAgentsPresetsRetrieveParams.shape['id'].describe(
             'ID of the profile (a UUID). A profile name is not accepted here.'
         ),
     })
 }
 
-const cloudAgentsProfileGet = (): ToolBase<
-    ReturnType<typeof CloudAgentsProfileGetSchema>,
-    WithPostHogUrl<Schemas.Profile>
+const cloudAgentsPresetGet = (): ToolBase<
+    ReturnType<typeof CloudAgentsPresetGetSchema>,
+    WithPostHogUrl<Schemas.CloudAgentPreset>
 > => ({
-    name: 'cloud-agents-profile-get',
-    schema: CloudAgentsProfileGetSchema(),
-    handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsProfileGetSchema>>) => {
+    name: 'cloud-agents-preset-get',
+    schema: CloudAgentsPresetGetSchema(),
+    handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsPresetGetSchema>>) => {
         const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.Profile>({
+        const result = await context.api.request<Schemas.CloudAgentPreset>({
             method: 'GET',
-            path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/profiles/${encodeURIComponent(String(params.id))}/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/presets/${encodeURIComponent(String(params.id))}/`,
         })
         return await withPostHogUrl(context, result, `/cloud-agents/profiles/${result.id}`)
     },
 })
 
-const CloudAgentsProfileListSchema = () => {
-    const CloudAgentsProfilesListQueryParams = orvalSchemas.CloudAgentsProfilesListQueryParams()
-    return CloudAgentsProfilesListQueryParams
+const CloudAgentsPresetListSchema = () => {
+    const CloudAgentsPresetsListQueryParams = orvalSchemas.CloudAgentsPresetsListQueryParams()
+    return CloudAgentsPresetsListQueryParams
 }
 
-const cloudAgentsProfileList = (): ToolBase<
-    ReturnType<typeof CloudAgentsProfileListSchema>,
-    WithPostHogUrl<Schemas.PaginatedProfileList>
+const cloudAgentsPresetList = (): ToolBase<
+    ReturnType<typeof CloudAgentsPresetListSchema>,
+    WithPostHogUrl<Schemas.PaginatedCloudAgentPresetList>
 > => ({
-    name: 'cloud-agents-profile-list',
-    schema: CloudAgentsProfileListSchema(),
-    handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsProfileListSchema>>) => {
+    name: 'cloud-agents-preset-list',
+    schema: CloudAgentsPresetListSchema(),
+    handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsPresetListSchema>>) => {
         const projectId = await context.stateManager.getProjectId()
-        const result = await context.api.request<Schemas.PaginatedProfileList>({
+        const result = await context.api.request<Schemas.PaginatedCloudAgentPresetList>({
             method: 'GET',
-            path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/profiles/`,
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/cloud_agents/presets/`,
             query: {
                 limit: params.limit,
                 offset: params.offset,
@@ -145,13 +151,7 @@ const cloudAgentsProfileList = (): ToolBase<
         const filtered = {
             ...result,
             results: (result.results ?? []).map((item: any) =>
-                omitResponseFields(item, [
-                    'instructions',
-                    'pr_mode',
-                    'max_duration_minutes',
-                    'max_cost_usd',
-                    'created_by',
-                ])
+                omitResponseFields(item, ['instructions', 'created_by'])
             ),
         } as typeof result
         return await withPostHogUrl(
@@ -188,9 +188,9 @@ const cloudAgentsRunCancel = (): ToolBase<ReturnType<typeof CloudAgentsRunCancel
         const filtered = pickResponseFields(result, [
             'id',
             'status',
-            'stop_reason',
-            'error',
-            'completed_at',
+            'status_reason',
+            'status_detail',
+            'ended_at',
             'result',
             'cost',
         ]) as typeof result
@@ -222,14 +222,14 @@ const cloudAgentsRunCreate = (): ToolBase<
     handler: async (context: Context, params: z.infer<ReturnType<typeof CloudAgentsRunCreateSchema>>) => {
         const projectId = await context.stateManager.getProjectId()
         const body: Record<string, unknown> = {}
-        if (params.repository !== undefined) {
-            body['repository'] = params.repository
-        }
-        if (params.branch !== undefined) {
-            body['branch'] = params.branch
+        if (params.repositories !== undefined) {
+            body['repositories'] = params.repositories
         }
         if (params.model !== undefined) {
             body['model'] = params.model
+        }
+        if (params.reasoning_effort !== undefined) {
+            body['reasoning_effort'] = params.reasoning_effort
         }
         if (params.size !== undefined) {
             body['size'] = params.size
@@ -243,11 +243,17 @@ const cloudAgentsRunCreate = (): ToolBase<
         if (params.create_pr !== undefined) {
             body['create_pr'] = params.create_pr
         }
+        if (params.idle_minutes !== undefined) {
+            body['idle_minutes'] = params.idle_minutes
+        }
+        if (params.output_schema !== undefined) {
+            body['output_schema'] = params.output_schema
+        }
         if (params.prompt !== undefined) {
             body['prompt'] = params.prompt
         }
-        if (params.profile !== undefined) {
-            body['profile'] = params.profile
+        if (params.preset !== undefined) {
+            body['preset'] = params.preset
         }
         if (params.tags !== undefined) {
             body['tags'] = params.tags
@@ -264,9 +270,8 @@ const cloudAgentsRunCreate = (): ToolBase<
             'id',
             'status',
             'created_at',
-            'repository',
-            'branch',
-            'profile',
+            'repositories',
+            'preset',
             'config.model',
             'config.size',
             'config.inference',
@@ -344,7 +349,7 @@ const cloudAgentsRunList = (): ToolBase<
                 created_before: params.created_before,
                 limit: params.limit,
                 offset: params.offset,
-                profile_id: params.profile_id,
+                preset_id: params.preset_id,
                 repository: params.repository,
                 status: params.status,
                 tag: params.tag,
@@ -356,14 +361,13 @@ const cloudAgentsRunList = (): ToolBase<
                 pickResponseFields(item, [
                     'id',
                     'status',
-                    'stop_reason',
-                    'error',
+                    'status_reason',
+                    'status_detail',
                     'created_at',
-                    'completed_at',
+                    'ended_at',
                     'prompt',
-                    'repository',
-                    'branch',
-                    'profile',
+                    'repositories',
+                    'preset',
                     'result.pr_url',
                     'cost.total_usd',
                     'cost.final',
@@ -416,7 +420,7 @@ const cloudAgentsRunMessage = (): ToolBase<ReturnType<typeof CloudAgentsRunMessa
             'resumed',
             'run.id',
             'run.status',
-            'run.stop_reason',
+            'run.status_reason',
             'run.agent_sessions',
         ]) as typeof result
         return filtered
@@ -472,9 +476,9 @@ const cloudAgentsUsageSummary = (): ToolBase<
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'cloud-agents-catalog': cloudAgentsCatalog,
     'cloud-agents-estimate': cloudAgentsEstimate,
-    'cloud-agents-profile-create': cloudAgentsProfileCreate,
-    'cloud-agents-profile-get': cloudAgentsProfileGet,
-    'cloud-agents-profile-list': cloudAgentsProfileList,
+    'cloud-agents-preset-create': cloudAgentsPresetCreate,
+    'cloud-agents-preset-get': cloudAgentsPresetGet,
+    'cloud-agents-preset-list': cloudAgentsPresetList,
     'cloud-agents-run-cancel': cloudAgentsRunCancel,
     'cloud-agents-run-create': cloudAgentsRunCreate,
     'cloud-agents-run-events': cloudAgentsRunEvents,

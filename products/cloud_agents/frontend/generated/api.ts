@@ -11,6 +11,8 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
 import type {
     CloudAgentCatalogApi,
     CloudAgentEstimateApi,
+    CloudAgentPresetApi,
+    CloudAgentPresetCreateApi,
     CloudAgentRunApi,
     CloudAgentRunCreateApi,
     CloudAgentRunEventsApi,
@@ -20,16 +22,14 @@ import type {
     CloudAgentSettingsApi,
     CloudAgentUsageSummaryApi,
     CloudAgentsEstimateRetrieveParams,
-    CloudAgentsProfilesListParams,
+    CloudAgentsPresetsListParams,
     CloudAgentsRunsEventsRetrieveParams,
     CloudAgentsRunsListParams,
     CloudAgentsUsageRetrieveParams,
+    PaginatedCloudAgentPresetListApi,
     PaginatedCloudAgentRunListApi,
-    PaginatedProfileListApi,
+    PatchedCloudAgentPresetUpdateApi,
     PatchedCloudAgentSettingsUpdateApi,
-    PatchedProfileUpdateApi,
-    ProfileApi,
-    ProfileCreateApi,
 } from './api.schemas'
 
 export const getCloudAgentsCatalogRetrieveUrl = (projectId: string) => {
@@ -81,7 +81,7 @@ export const cloudAgentsEstimateRetrieve = async (
     })
 }
 
-export const getCloudAgentsProfilesListUrl = (projectId: string, params?: CloudAgentsProfilesListParams) => {
+export const getCloudAgentsPresetsListUrl = (projectId: string, params?: CloudAgentsPresetsListParams) => {
     const normalizedParams = new URLSearchParams()
 
     Object.entries(params || {}).forEach(([key, value]) => {
@@ -93,101 +93,101 @@ export const getCloudAgentsProfilesListUrl = (projectId: string, params?: CloudA
     const stringifiedParams = normalizedParams.toString()
 
     return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/cloud_agents/profiles/?${stringifiedParams}`
-        : `/api/projects/${projectId}/cloud_agents/profiles/`
+        ? `/api/projects/${projectId}/cloud_agents/presets/?${stringifiedParams}`
+        : `/api/projects/${projectId}/cloud_agents/presets/`
 }
 
 /**
  * Base for every cloud_agents viewset: the scope object, the feature flag, and the error mapping.
- * @summary List profiles
+ * @summary List presets
  */
-export const cloudAgentsProfilesList = async (
+export const cloudAgentsPresetsList = async (
     projectId: string,
-    params?: CloudAgentsProfilesListParams,
+    params?: CloudAgentsPresetsListParams,
     options?: RequestInit
-): Promise<PaginatedProfileListApi> => {
-    return apiMutator<PaginatedProfileListApi>(getCloudAgentsProfilesListUrl(projectId, params), {
+): Promise<PaginatedCloudAgentPresetListApi> => {
+    return apiMutator<PaginatedCloudAgentPresetListApi>(getCloudAgentsPresetsListUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
 }
 
-export const getCloudAgentsProfilesCreateUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/cloud_agents/profiles/`
+export const getCloudAgentsPresetsCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/cloud_agents/presets/`
 }
 
 /**
- * A profile is a named set of run defaults. A run names a profile to use its defaults.
- * @summary Create a profile
+ * A preset is a named set of run defaults. A run that names a preset needs only a prompt.
+ * @summary Create a preset
  */
-export const cloudAgentsProfilesCreate = async (
+export const cloudAgentsPresetsCreate = async (
     projectId: string,
-    profileCreateApi: ProfileCreateApi,
+    cloudAgentPresetCreateApi: CloudAgentPresetCreateApi,
     options?: RequestInit
-): Promise<ProfileApi> => {
-    return apiMutator<ProfileApi>(getCloudAgentsProfilesCreateUrl(projectId), {
+): Promise<CloudAgentPresetApi> => {
+    return apiMutator<CloudAgentPresetApi>(getCloudAgentsPresetsCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(profileCreateApi),
+        body: JSON.stringify(cloudAgentPresetCreateApi),
     })
 }
 
-export const getCloudAgentsProfilesRetrieveUrl = (projectId: string, id: string) => {
-    return `/api/projects/${projectId}/cloud_agents/profiles/${id}/`
+export const getCloudAgentsPresetsRetrieveUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/cloud_agents/presets/${id}/`
 }
 
 /**
  * Base for every cloud_agents viewset: the scope object, the feature flag, and the error mapping.
- * @summary Retrieve a profile
+ * @summary Retrieve a preset
  */
-export const cloudAgentsProfilesRetrieve = async (
+export const cloudAgentsPresetsRetrieve = async (
     projectId: string,
     id: string,
     options?: RequestInit
-): Promise<ProfileApi> => {
-    return apiMutator<ProfileApi>(getCloudAgentsProfilesRetrieveUrl(projectId, id), {
+): Promise<CloudAgentPresetApi> => {
+    return apiMutator<CloudAgentPresetApi>(getCloudAgentsPresetsRetrieveUrl(projectId, id), {
         ...options,
         method: 'GET',
     })
 }
 
-export const getCloudAgentsProfilesPartialUpdateUrl = (projectId: string, id: string) => {
-    return `/api/projects/${projectId}/cloud_agents/profiles/${id}/`
+export const getCloudAgentsPresetsPartialUpdateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/cloud_agents/presets/${id}/`
 }
 
 /**
  * Only the fields in the request change. A null value clears a default.
- * @summary Update a profile
+ * @summary Update a preset
  */
-export const cloudAgentsProfilesPartialUpdate = async (
+export const cloudAgentsPresetsPartialUpdate = async (
     projectId: string,
     id: string,
-    patchedProfileUpdateApi?: PatchedProfileUpdateApi,
+    patchedCloudAgentPresetUpdateApi?: PatchedCloudAgentPresetUpdateApi,
     options?: RequestInit
-): Promise<ProfileApi> => {
-    return apiMutator<ProfileApi>(getCloudAgentsProfilesPartialUpdateUrl(projectId, id), {
+): Promise<CloudAgentPresetApi> => {
+    return apiMutator<CloudAgentPresetApi>(getCloudAgentsPresetsPartialUpdateUrl(projectId, id), {
         ...options,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(patchedProfileUpdateApi),
+        body: JSON.stringify(patchedCloudAgentPresetUpdateApi),
     })
 }
 
-export const getCloudAgentsProfilesDestroyUrl = (projectId: string, id: string) => {
-    return `/api/projects/${projectId}/cloud_agents/profiles/${id}/`
+export const getCloudAgentsPresetsDestroyUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/cloud_agents/presets/${id}/`
 }
 
 /**
- * Runs that used the profile keep their configuration. The name becomes free.
- * @summary Delete a profile
+ * Runs that used the preset keep their configuration. The name becomes free.
+ * @summary Delete a preset
  */
-export const cloudAgentsProfilesDestroy = async (
+export const cloudAgentsPresetsDestroy = async (
     projectId: string,
     id: string,
     options?: RequestInit
 ): Promise<void> => {
-    return apiMutator<void>(getCloudAgentsProfilesDestroyUrl(projectId, id), {
+    return apiMutator<void>(getCloudAgentsPresetsDestroyUrl(projectId, id), {
         ...options,
         method: 'DELETE',
     })
@@ -269,7 +269,7 @@ export const getCloudAgentsRunsCancelCreateUrl = (projectId: string, id: string)
 }
 
 /**
- * Asks the run to stop. The response has status 202 and the run can still be `running` for a short time. A run that already stopped is returned with status 200.
+ * Asks a `queued` or `running` run to stop. The response has status 202 and the run can still be `running` for a short time. It is then `done` with the reason `cancelled`. An `idle` or `done` run has no agent to stop, so it is returned with status 200 and does not change.
  * @summary Cancel a run
  */
 export const cloudAgentsRunsCancelCreate = async (
@@ -304,7 +304,7 @@ export const getCloudAgentsRunsEventsRetrieveUrl = (
 }
 
 /**
- * By default, the response is one JSON object with the stored events of all agent sessions. To follow a live run, send `Accept: text/event-stream`. The response is then a Server-Sent Events stream of the current agent session. Its first frame is `event: run` with the ID, the status and the stop reason of the run. `Last-Event-ID` and `start=latest` apply to the stream only. To resume after a disconnect, send the `id` of the last event in the `Last-Event-ID` header.
+ * By default, the response is one JSON object with the stored events of all agent sessions. To follow a live run, send `Accept: text/event-stream`. The response is then a Server-Sent Events stream of the current agent session. Its first frame is `event: run` with the ID, the status and the status reason of the run. `Last-Event-ID` and `start=latest` apply to the stream only. To resume after a disconnect, send the `id` of the last event in the `Last-Event-ID` header.
  *
  * **SDK consumers**: a generated fetch wrapper buffers the stream. Use the JSON default through it, and read the stream with a streaming `fetch` or an `EventSource` client.
  * @summary Read the events of a run
@@ -326,7 +326,7 @@ export const getCloudAgentsRunsMessagesCreateUrl = (projectId: string, id: strin
 }
 
 /**
- * Sends a follow-up message. An agent that is at work gets the message in its current session. A run that stopped starts a new agent session with the message and goes back to `queued`.
+ * Sends a follow-up message. An agent that is at work gets the message in its current session. An `idle` run starts a new agent session with the message and goes back to `queued`. A `done` run refuses the message with status 409 and the code `run_done`.
  * @summary Send a message to a run
  */
 export const cloudAgentsRunsMessagesCreate = async (
@@ -418,7 +418,7 @@ export const getCloudAgentsUsageRetrieveUrl = (projectId: string, params?: Cloud
 }
 
 /**
- * Cost and usage totals of the runs created in a date range, for each day or for each profile.
+ * Cost and usage totals of the runs created in a date range, for each day or for each preset.
  * @summary Retrieve cloud agents usage
  */
 export const cloudAgentsUsageRetrieve = async (

@@ -10,6 +10,7 @@ from asgiref.sync import async_to_sync
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
+from products.tasks.backend.constants import COMPUTE_WAIVED_REASON_STATE_KEY
 from products.tasks.backend.models import Loop, SandboxSession, Task, TaskClientProvenance, TaskRun
 from products.tasks.backend.temporal.metrics import record_run_token_usage
 from products.tasks.backend.temporal.process_task.activities.update_task_run_status import (
@@ -467,7 +468,7 @@ class TestUpdateTaskRunStatusActivity:
         )
         TaskRun.objects.filter(id=test_task_run.id).update(environment=TaskRun.Environment.CLOUD, origin_product=origin)
         started = timezone.now() - timedelta(hours=1)
-        session = SandboxSession.objects.for_team(test_task_run.team_id).create(
+        SandboxSession.objects.for_team(test_task_run.team_id).create(
             team_id=test_task_run.team_id,
             task_run=test_task_run,
             sandbox_id="sb-waiver",
@@ -485,10 +486,8 @@ class TestUpdateTaskRunStatusActivity:
         input_data = UpdateTaskRunStatusInput(run_id=str(test_task_run.id), status=status, error_type=error_type)
         async_to_sync(_run_update_task_run_status)(activity_environment, input_data)
 
-        session.refresh_from_db()
         test_task_run.refresh_from_db()
-        assert (session.waived_at is not None) is waived
-        assert session.waived_reason == (error_type if waived else None)
+        assert test_task_run.state.get(COMPUTE_WAIVED_REASON_STATE_KEY) == (error_type if waived else None)
         if origin == Task.OriginProduct.CLOUD_AGENTS:
             assert test_task_run.state["compute_cost"] == (0 if waived else 18)
 

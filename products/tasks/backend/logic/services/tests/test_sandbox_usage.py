@@ -11,6 +11,7 @@ from posthog.models.organization import Organization
 from posthog.models.scoping import team_scope
 from posthog.models.team.team import Team
 
+from products.tasks.backend.constants import COMPUTE_WAIVED_REASON_STATE_KEY
 from products.tasks.backend.logic.services.sandbox import Sandbox, SandboxConfig
 from products.tasks.backend.logic.services.sandbox_pricing import (
     CLOUD_AGENTS_RATE_CARD,
@@ -444,8 +445,12 @@ class TestSandboxUsageAggregation(SandboxUsageBase):
             user_attributed_at=begin + timedelta(hours=1),
             ended_at=begin + timedelta(hours=2),
         )
-        assert waive_run_sandbox_sessions(waived.task_run_id, self.team.id, "SandboxProvisionError") == 1
-        assert waive_run_sandbox_sessions(desktop.task_run_id, self.team.id, "SandboxProvisionError") == 0
+        assert waive_run_sandbox_sessions(waived.task_run_id, self.team.id, "SandboxProvisionError") is True
+        assert waive_run_sandbox_sessions(desktop.task_run_id, self.team.id, "SandboxProvisionError") is False
+        # The first reason of a run stays.
+        assert waive_run_sandbox_sessions(waived.task_run_id, self.team.id, "SandboxTimeoutError") is True
+        # A marker that a client forged on a run of another product must not make that run free.
+        TaskRun.update_state_atomic(desktop.task_run_id, updates={COMPUTE_WAIVED_REASON_STATE_KEY: "forged"})
 
         cloud_agents = get_billable_sandbox_compute_usage_by_team(begin, end, product="cloud_agents")
         default = get_billable_sandbox_compute_usage_by_team(begin, end)
@@ -457,8 +462,8 @@ class TestSandboxUsageAggregation(SandboxUsageBase):
         # 4 vCPU and 16 GiB for one hour at the PostHog Desktop card.
         assert default.credits == [(self.team.id, 154)]
         assert default == desktop_only
-        desktop.refresh_from_db()
-        assert desktop.waived_at is None
+        waived_run_state = TaskRun.objects.get(id=waived.task_run_id).state
+        assert waived_run_state[COMPUTE_WAIVED_REASON_STATE_KEY] == "SandboxProvisionError"
 
     def test_billable_compute_includes_user_loops_and_excludes_internal_loops(self):
         self._loop_session(internal=False)

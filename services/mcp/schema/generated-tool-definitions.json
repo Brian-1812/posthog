@@ -2637,7 +2637,7 @@
         "feature_flag": "cloud-agents",
         "feature_flag_behavior": "enable"
     },
-    "cloud-agents-profile-create": {
+    "cloud-agents-preset-create": {
         "description": "Create a profile: a named set of run defaults such as repository, branch, model, size, inference mode, instructions and tags. A run that names the profile uses these defaults, so later runs need only a prompt. Only `name` is required, and the name must be unique in the project. Creating a profile starts no run and costs nothing. A value sent on a run overrides the profile value for that run.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
@@ -2653,8 +2653,8 @@
         "feature_flag": "cloud-agents",
         "feature_flag_behavior": "enable"
     },
-    "cloud-agents-profile-get": {
-        "description": "Get one profile by ID, with all the run defaults it sets. A null field sets no default. Use cloud-agents-profile-list to find the ID.",
+    "cloud-agents-preset-get": {
+        "description": "Get one profile by ID, with all the run defaults it sets. A null field sets no default. Use cloud-agents-preset-list to find the ID.",
         "category": "Cloud agents",
         "feature": "cloud_agents",
         "summary": "Get cloud agent profile",
@@ -2669,7 +2669,7 @@
         "feature_flag": "cloud-agents",
         "feature_flag_behavior": "enable"
     },
-    "cloud-agents-profile-list": {
+    "cloud-agents-preset-list": {
         "description": "List the profiles of the project. A profile is a named set of run defaults. Use it to find a profile to pass as `profile` to cloud-agents-run-create, by ID or by name.",
         "category": "Cloud agents",
         "feature": "cloud_agents",

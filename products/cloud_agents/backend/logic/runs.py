@@ -52,11 +52,12 @@ from ..facade.contracts import (
     InvalidInput,
     MessageResult,
     OrganizationDeactivated,
-    ProfileDTO,
-    ProfileNotFound,
+    PresetDTO,
+    PresetNotFound,
     ResolvedRunConfig,
     RunCancelUnavailable,
     RunCreateInput,
+    RunDone,
     RunDTO,
     RunEventsDTO,
     RunListFilters,
@@ -68,7 +69,7 @@ from ..facade.contracts import (
     TeamSettingsDTO,
     UsageLimited,
 )
-from ..facade.enums import InferenceMode
+from ..facade.enums import CloudAgentRunStatus, InferenceMode
 from ..models import CloudAgentRun
 from . import (
     limits,
@@ -77,17 +78,26 @@ from . import (
 from .analytics import capture_event
 from .config_resolution import render_prompt, resolve_run_config
 from .cost import to_cost_dto, to_session_usage_dtos
-from .profiles import get_profile, get_profile_by_ref
-from .run_rows import build_run_dto, get_run_row, read_task_billing, read_task_state, run_rows, to_run_dto, to_run_dtos
+from .presets import get_preset, get_preset_by_ref
+from .run_rows import (
+    build_run_dto,
+    get_run_row,
+    read_task_billing,
+    read_task_state,
+    run_rows,
+    run_status,
+    task_ids_with_status,
+    to_run_dto,
+    to_run_dtos,
+)
 from .settings import get_team_settings
 
-INACTIVITY_TIMEOUT_SECONDS: Final = 600
 MAX_RETRY_AFTER_SECONDS: Final = 24 * 60 * 60
 TITLE_MAX_LENGTH: Final = 120
 EVENT_LOG_MAX_BYTES: Final = 16 * 1024 * 1024
 RUN_ID_STATE_KEY: Final = "cloud_agents_run_id"
-# A list with a status filter covers the newest runs of that status up to this number, because
-# Tasks holds the status and gives this product the tasks to show.
+# A list with a status filter covers the newest tasks that Tasks gives for the status, up to this
+# number, because Tasks holds the status and gives this product the tasks to show.
 STATUS_FILTER_MAX_RUNS: Final = 1000
 # Tasks stores a task a short time after this product stores its run, in the same request. A
 # task that belongs to a run from before `created_before` can thus be newer than that time.
@@ -149,17 +159,17 @@ def _find_replay(team_id: int, idempotency_key: str, body_hash: str) -> RunDTO |
     return to_run_dto(team_id, run)
 
 
-def _resolve_profile(team_id: int, ref: str | None, settings: TeamSettingsDTO) -> ProfileDTO | None:
+def _resolve_preset(team_id: int, ref: str | None, settings: TeamSettingsDTO) -> PresetDTO | None:
     if ref:
         try:
-            return get_profile_by_ref(team_id, ref)
-        except ProfileNotFound:
-            raise InvalidInput("This profile does not exist in this project.", attr="profile") from None
-    if settings.default_profile_id is None:
+            return get_preset_by_ref(team_id, ref)
+        except PresetNotFound:
+            raise InvalidInput("This preset does not exist in this project.", attr="preset") from None
+    if settings.default_preset_id is None:
         return None
     try:
-        return get_profile(team_id, settings.default_profile_id)
-    except ProfileNotFound:
+        return get_preset(team_id, settings.default_preset_id)
+    except PresetNotFound:
         return None
 
 
@@ -208,8 +218,16 @@ def _resolve_inference(
         raise InvalidInput(error.detail, attr="inference") from error
 
 
-def _run_state(run: CloudAgentRun, config: ResolvedRunConfig) -> dict[str, object]:
-    return {RUN_ID_STATE_KEY: str(run.id), "max_duration_minutes": config.max_duration_minutes}
+def _run_state(run: CloudAgentRun) -> dict[str, object]:
+    return {RUN_ID_STATE_KEY: str(run.id)}
+
+
+def _reasoning_effort(config: ResolvedRunConfig) -> str | None:
+    return config.reasoning_effort.value if config.reasoning_effort is not None else None
+
+
+# Tasks names the request field at fault. These are the fields that have the same name in this API.
+_TASK_INVALID_ATTRS: Final = frozenset({"model", "output_schema"})
 
 
 def _create_run(
@@ -238,9 +256,8 @@ def _create_run(
                     caller_product=caller.product,
                     billable=caller.billable,
                     prompt=data.prompt,
-                    repository=config.repository,
-                    branch=config.branch,
-                    profile_id=config.profile_id,
+                    repository=config.repositories[0].name,
+                    preset_id=config.preset_id,
                     tags=config.tags,
                     metadata=dict(data.metadata or {}),
                     idempotency_key=idempotency_key,
@@ -263,21 +280,22 @@ def _create_run(
                 user_id=user_id,
                 prompt=render_prompt(config, data.prompt),
                 title=data.prompt[:TITLE_MAX_LENGTH],
-                repository=config.repository,
-                branch=config.branch,
+                repository=config.repositories[0].name,
+                branch=config.repositories[0].initial_branch,
                 create_pr=config.create_pr,
                 origin_key=_origin_key(team_id, idempotency_key) if idempotency_key else None,
                 billable=caller.billable,
                 sandbox_size=SandboxSize(config.size.value),
                 model=selection.model,
                 runtime_adapter=selection.runtime_adapter,
-                reasoning_effort=None,
-                inactivity_timeout_seconds=INACTIVITY_TIMEOUT_SECONDS,
-                extra_run_state=_run_state(run, config),
+                reasoning_effort=_reasoning_effort(config),
+                inactivity_timeout_seconds=config.idle_minutes * 60,
+                extra_run_state=_run_state(run),
                 inference_state=decision.run_state_updates,
+                output_schema=config.output_schema,
             )
         except CloudAgentTaskInvalid as error:
-            raise InvalidInput(error.detail, attr=error.attr if error.attr == "model" else None) from error
+            raise InvalidInput(error.detail, attr=error.attr if error.attr in _TASK_INVALID_ATTRS else None) from error
         if task.run is None:
             raise RuntimeError(f"Tasks returned no run for cloud agent run {run.id}")
         run.task_id = task.task_id
@@ -300,8 +318,8 @@ def start_run(
         raise InvalidInput("A run needs a user. Use a personal API key or an OAuth token of a user.")
 
     settings = get_team_settings(team_id)
-    profile = _resolve_profile(team_id, data.profile, settings)
-    config = resolve_run_config(data, profile, settings)
+    preset = _resolve_preset(team_id, data.preset, settings)
+    config = resolve_run_config(data, preset, settings)
     selection = _select_model(config.model)
 
     _check_quota(team_id, billable=caller.billable)
@@ -333,7 +351,8 @@ def start_run(
             "size": config.size.value,
             "inference_requested": config.inference.value,
             "inference_resolved": decision.mode,
-            "profile_used": config.profile_id is not None,
+            "preset_used": config.preset_id is not None,
+            "has_output_schema": config.output_schema is not None,
             "has_idempotency_key": idempotency_key is not None,
         },
     )
@@ -360,6 +379,16 @@ def get_run_usage(team_id: int, run_id: UUID) -> RunUsageDTO:
 
 def list_runs(team_id: int, filters: RunListFilters) -> RunList:
     rows = run_rows(team_id)
+    if filters.preset_id is not None:
+        rows = rows.filter(preset_id=filters.preset_id)
+    if filters.repository:
+        rows = rows.filter(repository__icontains=filters.repository)
+    if filters.tag:
+        rows = rows.filter(tags__contains=[filters.tag])
+    if filters.created_after is not None:
+        rows = rows.filter(created_at__gte=filters.created_after)
+    if filters.created_before is not None:
+        rows = rows.filter(created_at__lt=filters.created_before)
     if filters.status is not None:
         task_ids = list_cloud_agent_task_ids(
             team_id=team_id,
@@ -371,17 +400,12 @@ def list_runs(team_id: int, filters: RunListFilters) -> RunList:
                 filters.created_before + TASK_CREATED_AFTER_RUN_MARGIN if filters.created_before is not None else None
             ),
         )
+        if status_logic.shares_task_run_statuses(filters.status):
+            # Tasks cannot tell `idle` from `done`. The other filters go first, so the states are
+            # read only for the runs that can be in the result.
+            matching = list(rows.filter(task_id__in=task_ids).values_list("task_id", flat=True))
+            task_ids = task_ids_with_status(team_id, filters.status, matching)
         rows = rows.filter(task_id__in=task_ids)
-    if filters.profile_id is not None:
-        rows = rows.filter(profile_id=filters.profile_id)
-    if filters.repository:
-        rows = rows.filter(repository__icontains=filters.repository)
-    if filters.tag:
-        rows = rows.filter(tags__contains=[filters.tag])
-    if filters.created_after is not None:
-        rows = rows.filter(created_at__gte=filters.created_after)
-    if filters.created_before is not None:
-        rows = rows.filter(created_at__lt=filters.created_before)
     # The id breaks a tie between two runs of the same instant, so a page boundary never repeats a run.
     return RunList(team_id, rows.order_by("-created_at", "-id"))
 
@@ -448,12 +472,14 @@ def _resume(team_id: int, run_id: UUID, user_id: int, previous: TaskRunDTO, cont
                 user_id=user_id,
                 previous_run_id=previous.id,
                 message=content,
-                # The size and the model are fixed for the life of the run.
+                # The size is fixed for the life of the run.
                 sandbox_size=SandboxSize(config.size.value),
                 model=config.model,
-                reasoning_effort=None,
-                inactivity_timeout_seconds=INACTIVITY_TIMEOUT_SECONDS,
-                extra_run_state=_run_state(run, config),
+                # The model, the effort and the idle time are fixed too. The task holds the output
+                # schema, so each new session must return a result that matches it.
+                reasoning_effort=_reasoning_effort(config),
+                inactivity_timeout_seconds=config.idle_minutes * 60,
+                extra_run_state=_run_state(run),
                 inference_state=None,
             )
         except (CloudAgentRunNotResumable, CloudAgentTaskNotFound):
@@ -465,11 +491,14 @@ def _resume(team_id: int, run_id: UUID, user_id: int, previous: TaskRunDTO, cont
 
 
 def send_message(team_id: int, caller: CallerIdentity, run_id: UUID, content: str) -> MessageResult:
-    """Send a follow-up message. A live agent gets it. A run that stopped starts a new agent session with it."""
+    """Send a follow-up message. A live agent gets it. An idle run starts a new agent session with it."""
     run = get_run_row(team_id, run_id)
+    state = read_task_state(team_id, run)
+    # Before the quota, so a run that can never continue does not tell the caller to try again later.
+    if run_status(state).status == CloudAgentRunStatus.DONE:
+        raise RunDone()
     _check_quota(team_id, billable=run.billable)
     _check_credential_owner(run, caller)
-    state = read_task_state(team_id, run)
     if state is None or state.current_task_run_id is None:
         raise RunNotReady()
     task_run = get_cloud_agent_task_run(team_id=team_id, run_id=state.current_task_run_id)
@@ -497,11 +526,16 @@ def send_message(team_id: int, caller: CallerIdentity, run_id: UUID, content: st
 
 
 def cancel_run(team_id: int, caller: CallerIdentity, run_id: UUID) -> tuple[RunDTO, bool]:
-    """Ask the run to stop. The flag is False when the run already ended, so there was nothing to cancel."""
+    """Ask the run to stop. The flag is False when the run has no agent at work, so there was nothing to cancel.
+
+    An idle run stays idle: it has no sandbox to stop, and this API has no operation that closes a run.
+    """
     run = get_run_row(team_id, run_id)
     state = read_task_state(team_id, run)
     if state is None or state.current_task_run_id is None:
         raise RunNotReady()
+    if run_status(state).status in (CloudAgentRunStatus.IDLE, CloudAgentRunStatus.DONE):
+        return build_run_dto(run, state, read_task_billing(team_id, run)), False
     # The generic cancel has no origin check, so the run is resolved as a Cloud Agents run first.
     task_run = get_cloud_agent_task_run(team_id=team_id, run_id=state.current_task_run_id)
     if task_run is None:

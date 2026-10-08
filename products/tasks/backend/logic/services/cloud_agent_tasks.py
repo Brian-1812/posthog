@@ -5,6 +5,7 @@ task-shaped happens here, so that product never touches tasks internals. Each fu
 scoped to the reserved ``cloud_agents`` origin: a task of another origin is never found.
 """
 
+import json
 from collections.abc import Collection, Mapping
 from datetime import datetime
 from typing import Any, Literal
@@ -15,10 +16,13 @@ from django.db import IntegrityError, transaction
 from django.db.models import Min, OuterRef, QuerySet, Subquery, Value
 from django.db.models.functions import Coalesce
 
+from jsonschema import Draft202012Validator, SchemaError
+
 from posthog.dataclasses import frozen
 from posthog.models import User
 from posthog.models.team.team import Team
 
+from products.tasks.backend.constants import PR_STATES
 from products.tasks.backend.exceptions import COMPUTE_USAGE_LIMIT_ERROR_MESSAGE
 from products.tasks.backend.facade import (
     api as tasks_api,
@@ -34,6 +38,8 @@ from products.tasks.backend.logic.services.sandbox_config import (
     SANDBOX_SIZE_STATE_KEY,
     SandboxSize,
 )
+from products.tasks.backend.logic.services.sandbox_pricing import compute_waived
+from products.tasks.backend.logic.services.workflow_task_output import RUN_OUTPUT_RESERVED_KEYS
 from products.tasks.backend.models import SandboxSession, Task, TaskClientProvenance, TaskRun
 from products.tasks.backend.pr_urls import read_pr_urls
 from products.tasks.backend.temporal.process_task.activities.update_task_run_status import (
@@ -53,6 +59,10 @@ ACTIVE_RUN_STATUSES = [TaskRun.Status.NOT_STARTED, TaskRun.Status.QUEUED, TaskRu
 CLOUD_AGENT_POSTHOG_MCP_SCOPES: Literal["read_only"] = "read_only"
 
 TaskRunEnd = contracts.TaskRunEnd
+
+OUTPUT_SCHEMA_MAX_BYTES = 16 * 1024
+# The keys of a run output that Tasks writes. Every other key is a field that the agent returned.
+_TASKS_OUTPUT_KEYS = RUN_OUTPUT_RESERVED_KEYS | frozenset(tasks_api._INHERITED_PR_OUTPUT_KEYS)
 
 _WAITING_RUN_STATUSES = (TaskRun.Status.NOT_STARTED, TaskRun.Status.QUEUED)
 
@@ -102,6 +112,7 @@ def create_cloud_agent_task(
     inactivity_timeout_seconds: int | None,
     extra_run_state: Mapping[str, object] | None,
     inference_state: Mapping[str, object] | None = None,
+    output_schema: Mapping[str, object] | None = None,
 ) -> contracts.CloudAgentTaskDTO:
     """Create a Cloud Agents task and start its first run.
 
@@ -119,11 +130,18 @@ def create_cloud_agent_task(
     ``inference_state`` is ``InferenceDecision.run_state_updates`` from ``facade.inference``. It
     selects who pays for model use, and ``user_id`` becomes the owner of the selected credential.
     ``None`` is a run on PostHog credits. ``extra_run_state`` must not carry these keys.
+
+    ``output_schema`` is a JSON Schema for the result of the task. With a schema, each run of
+    the task must return a result that matches it, and the run completes when it does. Check
+    the schema with ``validate_cloud_agent_output_schema`` first: an invalid one raises
+    ``CloudAgentTaskInvalid`` here too.
     """
     _refuse_inference_keys(extra_run_state)
     replay = _find_replayed_task(team_id, origin_key)
     if replay is not None:
         return replay
+    if output_schema is not None:
+        validate_cloud_agent_output_schema(output_schema)
 
     selection = _resolve_model_selection(
         user_id=user_id, model=model, runtime_adapter=runtime_adapter, reasoning_effort=reasoning_effort
@@ -154,6 +172,7 @@ def create_cloud_agent_task(
                 posthog_mcp_scopes=CLOUD_AGENT_POSTHOG_MCP_SCOPES,
                 origin_key=origin_key,
                 internal=True,
+                output_schema=dict(output_schema) if output_schema is not None else None,
                 client_provenance=TaskClientProvenance.CLOUD_AGENTS if billable else None,
                 # An internal task gets no AI run defaults from Tasks, so the selection is pinned here.
                 runtime_adapter=selection.runtime_adapter,
@@ -260,6 +279,40 @@ def resume_cloud_agent_task(
     if run is None:
         raise CloudAgentRunNotResumable("The successor run was not created", attr="previous_run_id")
     return run
+
+
+def validate_cloud_agent_output_schema(schema: object) -> None:
+    """Raise ``CloudAgentTaskInvalid`` unless ``schema`` can be the output schema of a Cloud Agents task.
+
+    The result of a run is one JSON object that shares the run output with the fields that Tasks
+    writes there. So the schema must describe an object, and its properties must not use a name
+    that Tasks writes.
+    """
+    if not isinstance(schema, Mapping):
+        raise CloudAgentTaskInvalid("The output schema must be a JSON object.", attr="output_schema")
+    try:
+        size = len(json.dumps(schema))
+    except (TypeError, ValueError):
+        raise CloudAgentTaskInvalid("The output schema must be valid JSON.", attr="output_schema") from None
+    if size > OUTPUT_SCHEMA_MAX_BYTES:
+        raise CloudAgentTaskInvalid(
+            f"The output schema is too large. Use {OUTPUT_SCHEMA_MAX_BYTES} bytes of JSON at most.",
+            attr="output_schema",
+        )
+    if schema.get("type") != "object":
+        raise CloudAgentTaskInvalid('The output schema must have `"type": "object"`.', attr="output_schema")
+    properties = schema.get("properties")
+    reserved = sorted(_TASKS_OUTPUT_KEYS & set(properties)) if isinstance(properties, Mapping) else []
+    if reserved:
+        raise CloudAgentTaskInvalid(
+            f"These property names are reserved. Use different names: {', '.join(reserved)}.", attr="output_schema"
+        )
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        raise CloudAgentTaskInvalid(
+            f"The output schema is not a valid JSON Schema: {error.message}", attr="output_schema"
+        ) from None
 
 
 def classify_task_run_end(run: contracts.TaskRunDTO) -> TaskRunEnd:
@@ -464,13 +517,16 @@ def _state_without_runs(task_id: UUID) -> contracts.CloudAgentTaskStateDTO:
         status=TaskRun.Status.QUEUED.value,
         run_end=None,
         cancel_source=None,
+        compute_waived=False,
         current_task_run_id=None,
         started_at=None,
         completed_at=None,
         updated_at=None,
         pr_url=None,
         pr_urls=(),
+        pull_requests=(),
         summary=None,
+        structured_output=None,
         sessions=(),
     )
 
@@ -508,15 +564,43 @@ def _task_state(
         status=latest.status,
         run_end=_classify_end(latest.status, latest.error_message, latest_state) if latest.is_terminal else None,
         cancel_source=cancel_source if isinstance(cancel_source, str) else None,
+        compute_waived=compute_waived("cloud_agents", latest_state),
         current_task_run_id=latest.id,
         started_at=next((session.started_at for session in sessions if session.started_at is not None), None),
         completed_at=sessions[-1].ended_at,
         updated_at=max(run.updated_at for run in runs),
         pr_url=latest_pr_url or (pr_urls[0] if pr_urls else None),
         pr_urls=pr_urls,
+        pull_requests=tuple(
+            contracts.CloudAgentPullRequestDTO(url=url, state=_pull_request_state(url, runs)) for url in pr_urls
+        ),
         summary=next((summary for run in reversed(runs) if (summary := run.task_summary)), None),
+        structured_output=next((fields for run in reversed(runs) if (fields := _agent_output_fields(run))), None),
         sessions=tuple(sessions),
     )
+
+
+def _pull_request_state(url: str, runs: list[TaskRun]) -> contracts.PullRequestState | None:
+    """What the newest run that points at the pull request recorded for it.
+
+    A run output holds the state of its primary pull request only, so another pull request of
+    the same run has no state.
+    """
+    for run in reversed(runs):
+        output = run.output if isinstance(run.output, dict) else {}
+        if output.get("pr_url") != url:
+            continue
+        if output.get("pr_merged") is True:
+            return "merged"
+        state = output.get("pr_state")
+        if state in PR_STATES:
+            return state
+    return None
+
+
+def _agent_output_fields(run: TaskRun) -> dict[str, Any]:
+    output = run.output if isinstance(run.output, dict) else {}
+    return {key: value for key, value in output.items() if key not in _TASKS_OUTPUT_KEYS}
 
 
 def _refuse_inference_keys(extra_run_state: Mapping[str, object] | None) -> None:

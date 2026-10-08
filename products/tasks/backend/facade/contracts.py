@@ -18,7 +18,7 @@ their data results.
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -1139,26 +1139,43 @@ class CloudAgentSessionDTO:
     ended_at: datetime | None
 
 
+PullRequestState = Literal["open", "draft", "merged", "closed"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudAgentPullRequestDTO:
+    """One pull request of a Cloud Agents task. ``state`` is None while GitHub has not reported it."""
+
+    url: str
+    state: PullRequestState | None
+
+
 @dataclass(frozen=True, kw_only=True)
 class CloudAgentTaskStateDTO:
     """Where a Cloud Agents task stands, read from its runs. The latest run decides the status.
 
     ``run_end`` and ``completed_at`` are None while the latest run is active. ``cancel_source``
-    is the source that a cancel request named, when the latest run has one. ``pr_urls`` and
-    ``summary`` cover all runs of the task. A task with no run reads as ``queued``.
+    is the source that a cancel request named, when the latest run has one. ``compute_waived``
+    is True when the latest run failed on PostHog infrastructure, so its sandbox time is not
+    billed. ``pr_urls``, ``pull_requests`` and ``summary`` cover all runs of the task.
+    ``structured_output`` is the newest result that the agent returned for the output schema
+    of the task, and None when there is none. A task with no run reads as ``queued``.
     """
 
     task_id: UUID
     status: str
     run_end: TaskRunEnd | None
     cancel_source: str | None
+    compute_waived: bool
     current_task_run_id: UUID | None
     started_at: datetime | None
     completed_at: datetime | None
     updated_at: datetime | None
     pr_url: str | None
     pr_urls: tuple[str, ...]
+    pull_requests: tuple[CloudAgentPullRequestDTO, ...]
     summary: str | None
+    structured_output: dict[str, Any] | None
     sessions: tuple[CloudAgentSessionDTO, ...]
 
 

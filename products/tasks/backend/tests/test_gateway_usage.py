@@ -10,6 +10,7 @@ from django.utils import timezone
 from asgiref.sync import sync_to_async
 from parameterized import parameterized
 
+from products.tasks.backend.constants import COMPUTE_WAIVED_REASON_STATE_KEY
 from products.tasks.backend.facade.billing import TaskRunCost, get_task_cost, get_task_run_billing, get_task_run_cost
 from products.tasks.backend.logic.services.gateway_usage import (
     process_pending_gateway_usage,
@@ -322,6 +323,8 @@ class TestGatewayUsage(BaseTest):
         waive_run_sandbox_sessions(failed.id, self.team.id, "SandboxProvisionError")
 
         assert get_task_run_cost(run_id=failed.id, team_id=self.team.id).compute_cost == 0
+        assert refresh_task_run_cost(run_id=failed.id, team_id=self.team.id).compute_cost == 0
+        assert get_task_cost(team_id=self.team.id, task_id=task.id).compute_cost == 37
         billing = get_task_run_billing(team_id=self.team.id, task_id=task.id)
         assert billing.compute_cost_cents == 37
         assert billing.waived is True
@@ -330,9 +333,10 @@ class TestGatewayUsage(BaseTest):
 
     def test_waiver_never_changes_the_cost_of_another_product(self) -> None:
         run = self._run(status=TaskRun.Status.FAILED)
-        session = self._hour_session(run, "desktop")
+        self._hour_session(run, "desktop")
         before = get_task_run_cost(run_id=run.id, team_id=self.team.id)
-        SandboxSession.objects.for_team(self.team.id).filter(id=session.id).update(waived_at=timezone.now())
+        assert waive_run_sandbox_sessions(run.id, self.team.id, "SandboxProvisionError") is False
+        TaskRun.update_state_atomic(run.id, updates={COMPUTE_WAIVED_REASON_STATE_KEY: "SandboxProvisionError"})
 
         assert before.compute_cost
         assert get_task_run_cost(run_id=run.id, team_id=self.team.id) == before

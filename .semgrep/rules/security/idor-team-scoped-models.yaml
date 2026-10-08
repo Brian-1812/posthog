@@ -112,7 +112,7 @@ rules:
                               |ChannelStar
                               |ClusteringConfig
                               |ClusteringJob
-                              |CloudAgentProfile
+                              |CloudAgentPreset
                               |CloudAgentRun
                               |Cohort
                               |CohortBackfillChunk
@@ -567,7 +567,7 @@ rules:
                         |ChannelStar
                         |ClusteringConfig
                         |ClusteringJob
-                        |CloudAgentProfile
+                        |CloudAgentPreset
                         |CloudAgentRun
                         |Cohort
                         |CohortBackfillChunk

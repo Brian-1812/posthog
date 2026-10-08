@@ -113,7 +113,7 @@ EXISTING_CUSTOM_LIST_VIEWSETS = {
     "products.cdp.backend.api.hog_function.HogFunctionViewSet",
     "products.cdp.backend.api.hog_function_template.PublicHogFunctionTemplateViewSet",
     "products.cdp.backend.api.plugin_log_entry.PluginLogEntryViewSet",
-    "products.cloud_agents.backend.presentation.views.CloudAgentProfileViewSet",
+    "products.cloud_agents.backend.presentation.views.CloudAgentPresetViewSet",
     "products.cloud_agents.backend.presentation.views.CloudAgentRunViewSet",
     "products.cohorts.backend.api.staff_tools.CohortsStaffToolsViewSet",
     "products.conversations.backend.api.ai_context.AIContextAccountPropertiesViewSet",
