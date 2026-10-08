@@ -1249,8 +1249,9 @@ function TriggersSection(): JSX.Element {
                     <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold">Resolve comments on your PRs</div>
                         <div className="text-xs text-secondary">
-                            After a review of your pull request is published, PostHog Review works through its
+                            After a Full review of your pull request is published, PostHog Review works through its
                             unresolved comment threads: safe fixes land on the branch, and every thread gets a reply.
+                            Flash reviews never resolve comments.
                         </div>
                     </div>
                     <LemonSwitch
