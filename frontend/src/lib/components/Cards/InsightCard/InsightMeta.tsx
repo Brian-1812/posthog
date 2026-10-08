@@ -960,7 +960,7 @@ export function InsightMetaContent({
             {titleEl}
             {waitingForCapacity && (
                 <div role="status" className="text-sm text-secondary mt-1 whitespace-normal">
-                    Temporarily busy. Retrying automatically.
+                    PostHog is busy. Retrying automatically.
                 </div>
             )}
             {showDescription !== false && !!description && (

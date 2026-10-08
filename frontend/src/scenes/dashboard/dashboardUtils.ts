@@ -302,21 +302,6 @@ export const layoutsByTile = (layouts: ResponsiveLayouts): Record<string, Record
     return itemLayouts
 }
 
-function getRetryAfterSeconds(error: unknown): number | undefined {
-    if (!(error instanceof ApiError) || (error.status !== 429 && error.status !== 503)) {
-        return undefined
-    }
-    const value = error.headers?.get('Retry-After')?.trim()
-    if (!value) {
-        return undefined
-    }
-    if (/^\d+$/.test(value)) {
-        return Number(value)
-    }
-    const retryAt = Date.parse(value)
-    return Number.isFinite(retryAt) ? Math.max(0, (retryAt - Date.now()) / 1000) : undefined
-}
-
 function isValidRetryAfter(retryAfterSeconds: number | undefined): retryAfterSeconds is number {
     return typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
 }
@@ -443,9 +428,7 @@ export async function getInsightWithRetry(
                     return result
                 }
 
-                // A server cooldown lasts 30-60 seconds, so a second one would use up the retry window
-                // before the async fallback could start. Go to the async endpoint after the first one.
-                if (attempt >= maxAttempts || isValidRetryAfter(result.query_status.retry_after)) {
+                if (attempt >= maxAttempts) {
                     try {
                         const asyncApiUrl = (asyncRefresh: 'force_async' | 'async'): string =>
                             `api/projects/${currentTeamId}/insights/${insight.id}/?${toParams({
@@ -572,7 +555,8 @@ export async function getInsightWithRetry(
 
             attempt++
             const atCapacity = e instanceof ApiError && (e.status === 429 || e.status === 503)
-            if (attempt >= maxAttempts || !(await waitForRetry(getRetryAfterSeconds(e), atCapacity))) {
+            const retryAfterSeconds = e instanceof ApiError ? (e.retryAfterSeconds ?? undefined) : undefined
+            if (attempt >= maxAttempts || !(await waitForRetry(retryAfterSeconds, atCapacity))) {
                 throw e // Re-throw the error after max attempts
             }
         }

@@ -306,28 +306,21 @@ describe('getInsightWithRetry', () => {
         jest.useRealTimers()
     })
 
-    it.each(['429', '503', '503 with HTTP date'] as const)(
-        'honors retry guidance from %s before requesting again',
-        async (source) => {
-            jest.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-            const onCapacityWaitChange = jest.fn()
-            const getResponse = jest.spyOn(api, 'getResponse')
-            const headers = new Headers({
-                'Retry-After': source === '503 with HTTP date' ? 'Thu, 01 Jan 2026 00:00:47 GMT' : '47',
-            })
-            getResponse.mockRejectedValueOnce(new ApiError('Busy', source === '429' ? 429 : 503, headers))
-            getResponse.mockResolvedValue(insightResponse({ ...insight, result: [] }))
+    it.each([429, 503])('honors retry guidance from %s before requesting again', async (status) => {
+        const onCapacityWaitChange = jest.fn()
+        const getResponse = jest.spyOn(api, 'getResponse')
+        getResponse.mockRejectedValueOnce(new ApiError('Busy', status, new Headers({ 'Retry-After': '47' })))
+        getResponse.mockResolvedValue(insightResponse({ ...insight, result: [] }))
 
-            const request = getInsightWithRetry(1, insight, 60, 'q', 'blocking', { onCapacityWaitChange })
-            await jest.advanceTimersByTimeAsync(46_999)
-            expect(getResponse).toHaveBeenCalledTimes(1)
-            expect(onCapacityWaitChange.mock.calls).toEqual([[true]])
-            await jest.advanceTimersByTimeAsync(1)
-            expect((await request)?.result).toEqual([])
-            expect(getResponse).toHaveBeenCalledTimes(2)
-            expect(onCapacityWaitChange.mock.calls).toEqual([[true], [false]])
-        }
-    )
+        const request = getInsightWithRetry(1, insight, 60, 'q', 'blocking', { onCapacityWaitChange })
+        await jest.advanceTimersByTimeAsync(46_999)
+        expect(getResponse).toHaveBeenCalledTimes(1)
+        expect(onCapacityWaitChange.mock.calls).toEqual([[true]])
+        await jest.advanceTimersByTimeAsync(1)
+        expect((await request)?.result).toEqual([])
+        expect(getResponse).toHaveBeenCalledTimes(2)
+        expect(onCapacityWaitChange.mock.calls).toEqual([[true], [false]])
+    })
 
     it.each([
         { name: 'missing hint', retryAfter: undefined },
@@ -401,26 +394,23 @@ describe('getInsightWithRetry', () => {
         expect((await request)?.result).toEqual([])
     })
 
-    it('submits the async fallback after one tile cooldown, without another blocking attempt', async () => {
+    it('waits out a tile cooldown, then retries the blocking request before any async fallback', async () => {
         const onCapacityWaitChange = jest.fn()
-        jest.spyOn(lemonToast, 'error').mockImplementation()
         const getResponse = jest
             .spyOn(api, 'getResponse')
-            .mockResolvedValue(
-                insightResponse({ ...insight, result: null, query_status: { ...capacityStatus, retry_after: 30 } })
+            .mockResolvedValueOnce(
+                insightResponse({ ...insight, result: null, query_status: { ...capacityStatus, retry_after: 15 } })
             )
-        const get = jest.spyOn(api, 'get').mockImplementation(async () => {
-            expect(onCapacityWaitChange).toHaveBeenLastCalledWith(false)
-            return {}
-        })
+            .mockResolvedValue(insightResponse({ ...insight, result: [] }))
+        const get = jest.spyOn(api, 'get')
         const request = getInsightWithRetry(1, insight, 60, 'q', 'blocking', { onCapacityWaitChange })
-        await jest.advanceTimersByTimeAsync(29_999)
-        expect(get).not.toHaveBeenCalled()
+        await jest.advanceTimersByTimeAsync(14_999)
+        expect(getResponse).toHaveBeenCalledTimes(1)
         expect(onCapacityWaitChange.mock.calls).toEqual([[true]])
         await jest.advanceTimersByTimeAsync(1)
-        await request
-        expect(get).toHaveBeenCalledTimes(1)
-        expect(getResponse).toHaveBeenCalledTimes(1)
+        expect((await request)?.result).toEqual([])
+        expect(getResponse).toHaveBeenCalledTimes(2)
+        expect(get).not.toHaveBeenCalled()
     })
 
     it.each([
