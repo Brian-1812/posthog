@@ -5,9 +5,13 @@ Runs on the parsed AST — resolved against the team's HogQL schema when a datab
 enough for the SQL editor's validation debounce. The point is to fail at definition time with a
 message naming the construct, rather than at run time with a table that is quietly wrong.
 
+The incremental key must be a date or datetime: each run reads only rows above the last run's
+watermark, and only a key that grows with time keeps new source rows above it.
+
 The rule that does most of the work: when the query aggregates, the incremental key must be one of
 the grouping keys and the unique key must cover all of them. That makes every output row belong to
-exactly one bucket, and every touched bucket get recomputed from its source rows in full. Which in
+exactly one bucket, and, because that bucket key is time-ordered, every touched bucket gets
+recomputed from its source rows in full. Which in
 turn means *any* aggregate is safe here, including the non-associative ones (exact percentiles,
 count(DISTINCT), float sum) that Snowflake, Redshift, BigQuery and Databricks all have to reject.
 They have to reject them because they combine partial aggregates across refreshes; we never do.
@@ -80,24 +84,29 @@ _CONSTANT_TYPE_LABELS: dict[type, str] = {
     ast.AggregateStateType: "aggregate",
 }
 
-# Types that cannot serve as a watermark. Booleans, arrays, maps, and JSON have no "highest value
-# so far" for the next run to start from. Strings are excluded as a product call: lexicographic
-# order is arbitrary for most string columns, so offering them invites keys that silently miss
-# rows. UUIDs are excluded because only v7 is time-ordered and the column type cannot tell
-# versions apart — a v4 watermark jumps around and misses rows. Unknown types stay, since a wrong
-# exclusion hides a working column while a wrong inclusion just fails validation.
-_NON_KEY_TYPE_LABELS = {
-    "boolean",
-    "array",
-    "tuple",
-    "map",
-    "interval",
-    "aggregate",
-    "string",
-    "uuid",
-    "json",
-    "struct",
+# Only a time key keeps new source rows above the last run's watermark. A key like an id or a
+# counter does not grow with time, so new rows can land below the watermark and never be read.
+# Integer epoch timestamps qualify once converted with fromUnixTimestamp().
+_KEY_TYPE_LABELS = {"date", "datetime"}
+
+# How each type label reads in a sentence, for the key type blocker.
+_TYPE_LABEL_PHRASES = {
+    "integer": "an integer",
+    "decimal": "a decimal",
+    "float": "a float",
+    "string": "a string",
+    "json": "JSON",
+    "uuid": "a UUID",
+    "boolean": "a boolean",
+    "array": "an array",
+    "tuple": "a tuple",
+    "map": "a map",
+    "interval": "an interval",
+    "aggregate": "an aggregate state",
+    "struct": "a struct",
 }
+
+_NUMERIC_TYPE_LABELS = {"integer", "decimal", "float"}
 
 # The unique key has looser needs: it only has to identify a row, so any equatable type works —
 # and it MUST admit strings and booleans, since every GROUP BY column (event names, ids, flags)
@@ -140,11 +149,15 @@ def check_incremental_eligibility(
     resolved_selects = _resolved_selects(node, database)
     selects = resolved_selects if resolved_selects is not None else raw_selects
     all_candidates = _key_candidates(selects)
-    key_candidate_types = (
-        _key_candidate_types(resolved_selects, database) if resolved_selects is not None and database else {}
+    types_known = resolved_selects is not None and database is not None
+    key_candidate_types = _key_candidate_types(resolved_selects, database) if types_known else {}
+    # A column whose type cannot serve would only ever fail validation, so don't offer it. When the
+    # query did not resolve the types are unknown, so nothing is filtered.
+    key_candidates = (
+        [name for name in all_candidates if key_candidate_types.get(name) in _KEY_TYPE_LABELS]
+        if types_known
+        else all_candidates
     )
-    # A column whose type cannot serve would only ever fail validation, so don't offer it.
-    key_candidates = [name for name in all_candidates if key_candidate_types.get(name) not in _NON_KEY_TYPE_LABELS]
     unique_key_candidates = [
         name for name in all_candidates if key_candidate_types.get(name) not in _NON_UNIQUE_KEY_TYPE_LABELS
     ]
@@ -177,6 +190,8 @@ def check_incremental_eligibility(
         _check_key(select, config, blockers, warnings)
         _check_unique_key(select, config, blockers)
 
+    if database is not None:
+        _check_key_type(selects, config, key_candidate_types, blockers)
     _check_nullable_unique_key(config, column_types, blockers)
     _check_determinism(node, warnings)
 
@@ -460,6 +475,40 @@ def _check_key(select: ast.SelectQuery, config: IncrementalConfig, blockers: lis
             "filter cannot be pushed down to the source. Results stay correct, but each run will "
             "read as much data as a full refresh."
         )
+
+
+def _check_key_type(
+    selects: list[ast.SelectQuery],
+    config: IncrementalConfig,
+    key_candidate_types: dict[str, str],
+    blockers: list[str],
+) -> None:
+    """Fails closed: a key whose type cannot be determined is a key we cannot trust."""
+    key = config.incremental_key
+    key_expr = find_key_expression(selects[0], key) if selects else None
+    if key_expr is None or has_aggregation(key_expr):
+        # _check_key already reports a missing or aggregate key.
+        return
+
+    reason = (
+        "an incremental key must be a date or datetime, because only a time key keeps new rows "
+        "above the last run's watermark."
+    )
+    label = key_candidate_types.get(key)
+    if label in _KEY_TYPE_LABELS:
+        return
+    if label is None:
+        blockers.append(
+            f'The type of "{key}" could not be determined, and {reason} Cast it with toDateTime() so its type is clear.'
+        )
+        return
+    message = f'"{key}" is {_TYPE_LABEL_PHRASES.get(label, label)}, but {reason}'
+    if label in _NUMERIC_TYPE_LABELS:
+        message += (
+            " If this column holds a Unix timestamp, convert it with fromUnixTimestamp() or "
+            "fromUnixTimestamp64Milli() and use the result as the key."
+        )
+    blockers.append(message)
 
 
 def _check_unique_key(select: ast.SelectQuery, config: IncrementalConfig, blockers: list[str]) -> None:
