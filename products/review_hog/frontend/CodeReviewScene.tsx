@@ -2,7 +2,6 @@ import { useActions, useValues } from 'kea'
 
 import {
     IconBalance,
-    IconBolt,
     IconChat,
     IconChevronDown,
     IconConfetti,
@@ -66,6 +65,7 @@ import {
 
 import { AdoptSkillModal } from './AdoptSkillModal'
 import { PipelineDetailModal } from './PipelineDetailModal'
+import { RepositoriesSection } from './repositories/RepositoriesSection'
 import {
     CodeReviewTab,
     REVIEWS_PAGE_SIZE,
@@ -73,6 +73,7 @@ import {
     ReviewSkillKind,
     reviewHogSettingsLogic,
 } from './reviewHogSettingsLogic'
+import { SectionHeader } from './SectionHeader'
 
 /** "review-hog-perspective-logic-correctness" → "Logic correctness" */
 function prettifySkillName(skillName: string): string {
@@ -159,35 +160,6 @@ const URGENCY_STOPS: { key: ReviewUserSettingsUrgencyThresholdEnumApi; label: st
         description: 'Only blocking issues, the highest-priority findings. Everything else is dropped.',
     },
 ]
-
-function SectionHeader({
-    icon,
-    title,
-    pill,
-    action,
-    children,
-}: {
-    icon: JSX.Element
-    title: string
-    pill?: JSX.Element
-    action?: JSX.Element
-    children: string
-}): JSX.Element {
-    return (
-        <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-primary bg-surface-primary text-secondary *:size-4">
-                    {icon}
-                </span>
-                <h3 className="m-0 text-base font-semibold">{title}</h3>
-                {pill}
-                {action && <div className="ml-auto">{action}</div>}
-            </div>
-            {/* Indented so the copy aligns under the title, not the icon tile */}
-            <p className="m-0 ml-9 max-w-160 text-xs text-secondary">{children}</p>
-        </div>
-    )
-}
 
 // The Mine tooltip states what the backend's `mine` scope matches: the PR author OR the user who started the run.
 const REVIEWS_SCOPE_OPTIONS: {
@@ -443,9 +415,8 @@ function resolutionLabel(resolution: ReviewResolutionStatusApi): string {
 
 /** A first review still running: no findings to expand into yet, just the live stage. */
 function RunningReviewRow({ review }: { review: ReviewRecentReviewApi }): JSX.Element {
-    const { reviewsScope } = useValues(reviewHogSettingsLogic)
-    // On Everyone, whose PR it is matters at a glance; on Mine it is mostly yours.
-    const showAuthor = reviewsScope === ReviewHogReviewsListScope.Everyone && !!review.pr_author
+    const { showReviewAuthor } = useValues(reviewHogSettingsLogic)
+    const showAuthor = showReviewAuthor(review)
     return (
         <div className="flex items-center gap-3 px-4 py-3">
             <span className="flex w-6 shrink-0 justify-center">
@@ -480,12 +451,11 @@ function RunningReviewRow({ review }: { review: ReviewRecentReviewApi }): JSX.El
 
 /** One expandable review row: essentials collapsed; PR facts + funnel + findings entry when open. */
 function RecentReviewRow({ review }: { review: ReviewRecentReviewApi }): JSX.Element {
-    const { expandedReviewIds, reviewsScope } = useValues(reviewHogSettingsLogic)
+    const { expandedReviewIds, showReviewAuthor } = useValues(reviewHogSettingsLogic)
     const { toggleReviewRowExpanded, openReviewDetail } = useActions(reviewHogSettingsLogic)
     const expanded = expandedReviewIds.includes(review.id)
     const validated = review.must_fix_count + review.should_fix_count + review.consider_count
-    // On Everyone, whose PR it is matters at a glance; on Mine it is mostly yours.
-    const showAuthor = reviewsScope === ReviewHogReviewsListScope.Everyone && !!review.pr_author
+    const showAuthor = showReviewAuthor(review)
 
     // A first review has no completed turn to expand into — it renders as a live progress row.
     if (review.in_progress && review.run_count === 0) {
@@ -1179,7 +1149,15 @@ function TriggersSection(): JSX.Element {
 
     return (
         <section className="flex flex-col gap-4 border-t border-primary pt-8">
-            <SectionHeader icon={<IconFilter />} title="What gets reviewed">
+            <SectionHeader
+                icon={<IconFilter />}
+                title="More for my pull requests"
+                pill={
+                    <LemonTag type="highlight" size="small">
+                        Only you
+                    </LemonTag>
+                }
+            >
                 {settings?.show_internal_features
                     ? 'Choose which pull requests PostHog Review picks up automatically, and whether reviews also resolve the comment threads on them.'
                     : 'Choose whether reviews also resolve comment threads and how clean reviews appear on your pull requests.'}
@@ -1309,25 +1287,6 @@ function TriggersSection(): JSX.Element {
                         <p className="m-0 text-xs text-secondary">These settings apply only to Flash reviews.</p>
                     </div>
                     <LemonCard hoverEffect={false} className="divide-y divide-primary p-0">
-                        <div className="flex items-center gap-4 p-4">
-                            <div className="flex size-9 shrink-0 items-center justify-center rounded border border-primary bg-primary">
-                                <IconBolt className="size-5" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold">Review all your PRs in Flash mode</div>
-                                <div className="text-xs text-secondary">
-                                    Automatically review PRs you author in PostHog/posthog, including drafts and new
-                                    commits. Starts with future PR activity.
-                                </div>
-                            </div>
-                            <LemonSwitch
-                                aria-label="Review all your PRs in Flash mode"
-                                checked={settings?.review_authored_prs ?? false}
-                                onChange={(checked) => updateSettings({ review_authored_prs: checked })}
-                                disabledReason={switchDisabledReason}
-                                loading={settingsLoading}
-                            />
-                        </div>
                         <div className="flex items-center gap-4 p-4">
                             <div className="flex size-9 shrink-0 items-center justify-center rounded border border-primary bg-primary">
                                 <IconBalance className="size-5" />
@@ -1839,11 +1798,18 @@ function SettingsTab(): JSX.Element {
 
     return (
         <>
-            <PipelineSection />
+            <RepositoriesSection />
             <TriggersSection />
             <section className="flex flex-col gap-8 border-t border-primary pt-8">
                 <div className="flex flex-col gap-1.5">
-                    <h2 className="m-0 text-xl font-bold">Review skills</h2>
+                    <h2 className="m-0 text-xl font-bold">Full review settings</h2>
+                    <p className="m-0 max-w-160 text-sm text-secondary">
+                        Full reviews use these settings. Flash reviews do not use them.
+                    </p>
+                </div>
+                <PipelineSection />
+                <div className="flex flex-col gap-1.5 border-t border-primary pt-8">
+                    <h3 className="m-0 text-lg font-bold">Review skills</h3>
                     <p className="m-0 max-w-160 text-sm text-secondary">
                         Everything below is a regular skill, stored in your PostHog skills store like anything else
                         you've added. Review skills read your changed code, a blind-spot sweep catches what they missed,
@@ -1884,15 +1850,16 @@ function SettingsTab(): JSX.Element {
                     skills={resolutionSkills?.map((s) => ({ ...s, on: s.active })) ?? null}
                     onSelect={selectResolutionSkill}
                 />
+                <UrgencySection />
             </section>
-            <UrgencySection />
         </>
     )
 }
 
 /**
  * The "Code review" scene: ReviewHog's activity and settings page, split into an Activity tab
- * (trigger a review, recent reviews) and a Settings tab (what gets reviewed, skills, threshold).
+ * (trigger a review, recent reviews) and a Settings tab (repositories, more for my pull requests,
+ * full review settings).
  * Every control is live from load, no save step. See `reviewHogSettingsLogic` for the data flow.
  * Access is gated on FEATURE_FLAGS.REVIEW_HOG, the same flag that shows the menu entry, so whoever
  * discovers the entry can open the page.
