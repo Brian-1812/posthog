@@ -1,7 +1,7 @@
 import re
 import time
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from functools import lru_cache
@@ -328,21 +328,56 @@ def _task_inference_billing(runs: list[TaskRun]) -> InferenceBilling:
     return _run_inference_billing(max(runs, key=lambda run: run.created_at))
 
 
+_NO_RUNS_BILLING = TaskRunBillingDTO(
+    compute_cost_cents=None,
+    inference_cost_cents=None,
+    vcpu_seconds=Decimal(0),
+    gib_seconds=Decimal(0),
+    billable=False,
+    inference_billing="posthog",
+    rate_card_version=None,
+    waived=False,
+    settled=True,
+    sessions=(),
+)
+
+
 def get_task_run_billing(*, team_id: int, task_id: UUID) -> TaskRunBillingDTO:
-    runs = list(TaskRun.objects.select_related("task__loop").filter(team_id=team_id, task_id=task_id))
-    if not runs:
-        return TaskRunBillingDTO(
-            compute_cost_cents=None,
-            inference_cost_cents=None,
-            vcpu_seconds=Decimal(0),
-            gib_seconds=Decimal(0),
-            billable=False,
-            inference_billing="posthog",
-            rate_card_version=None,
-            waived=False,
-            settled=True,
-            sessions=(),
-        )
+    return get_tasks_billing(team_id=team_id, task_ids=[task_id])[task_id]
+
+
+def get_tasks_billing(
+    *, team_id: int, task_ids: Collection[UUID], origin_product: str | None = None
+) -> dict[UUID, TaskRunBillingDTO]:
+    """The charges of each task in ``task_ids``, read with the same number of queries for any number of tasks.
+
+    Every requested id is a key of the result. A task with no run in this team, or of another
+    origin when ``origin_product`` is set, has no charge.
+    """
+    billing = dict.fromkeys(task_ids, _NO_RUNS_BILLING)
+    if not billing:
+        return billing
+    runs = TaskRun.objects.select_related("task__loop").filter(team_id=team_id, task_id__in=list(billing))
+    if origin_product is not None:
+        runs = runs.filter(task__team_id=team_id, task__origin_product=origin_product)
+    runs_by_task: dict[UUID, list[TaskRun]] = {}
+    task_of_run: dict[UUID, UUID] = {}
+    for run in runs:
+        runs_by_task.setdefault(run.task_id, []).append(run)
+        task_of_run[run.id] = run.task_id
+    if not runs_by_task:
+        return billing
+    sessions_by_task: dict[UUID, list[SandboxSession]] = {}
+    sessions = SandboxSession.objects.for_team(team_id).filter(task_run_id__in=list(task_of_run))
+    for session in sessions.order_by("created_at", "id"):
+        sessions_by_task.setdefault(task_of_run[session.task_run_id], []).append(session)
+    now = timezone.now()
+    for task_id, task_runs in runs_by_task.items():
+        billing[task_id] = _task_billing(task_runs, sessions_by_task.get(task_id, []), now)
+    return billing
+
+
+def _task_billing(runs: list[TaskRun], sessions: list[SandboxSession], now: datetime) -> TaskRunBillingDTO:
     task = runs[0].task
     product = compute_pricing_product(task.origin_product)
     pricing = compute_pricing(product)
@@ -350,8 +385,6 @@ def get_task_run_billing(*, team_id: int, task_id: UUID) -> TaskRunBillingDTO:
     rate_card_version = pricing.rate_cards[-1].version if pricing.rate_cards else None
     inference_billing = _task_inference_billing(runs)
 
-    sessions = list(SandboxSession.objects.for_team(team_id).filter(task_run__in=runs).order_by("created_at", "id"))
-    now = timezone.now()
     session_rows: list[SandboxSessionUsageDTO] = []
     compute_usd: Decimal | None = Decimal(0) if sessions and pricing.rate_cards else None
     vcpu_seconds = Decimal(0)

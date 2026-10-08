@@ -6,6 +6,7 @@ import json
 import hashlib
 import dataclasses
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Final, cast, overload
 from uuid import UUID
 
@@ -16,7 +17,6 @@ from django.utils import timezone
 from posthog.dataclasses import frozen
 
 from products.tasks.backend.facade.api import read_task_run_history, signal_task_run_user_message
-from products.tasks.backend.facade.billing import get_task_run_billing
 from products.tasks.backend.facade.cancellation import cancel_task_run
 from products.tasks.backend.facade.cloud_agents import (
     CloudAgentRunNotResumable,
@@ -25,6 +25,7 @@ from products.tasks.backend.facade.cloud_agents import (
     count_active_cloud_agent_runs,
     create_cloud_agent_task,
     get_cloud_agent_task_run,
+    list_cloud_agent_task_ids,
     list_cloud_agent_task_run_ids,
     resume_cloud_agent_task,
 )
@@ -63,21 +64,21 @@ from ..facade.contracts import (
     RunNotReady,
     RunNotResumable,
     RunStopping,
+    RunUsageDTO,
     TeamSettingsDTO,
     UsageLimited,
 )
-from ..facade.enums import BillingMode, CloudAgentRunStatus, InferenceMode
+from ..facade.enums import InferenceMode
 from ..models import CloudAgentRun
 from . import (
     limits,
     status as status_logic,
-    sync,
 )
 from .analytics import capture_event
 from .config_resolution import render_prompt, resolve_run_config
-from .cost import apply_billing
+from .cost import to_cost_dto, to_session_usage_dtos
 from .profiles import get_profile, get_profile_by_ref
-from .run_rows import get_run_row, run_rows, session_entry, to_run_dto
+from .run_rows import build_run_dto, get_run_row, read_task_billing, read_task_state, run_rows, to_run_dto, to_run_dtos
 from .settings import get_team_settings
 
 INACTIVITY_TIMEOUT_SECONDS: Final = 600
@@ -85,6 +86,12 @@ MAX_RETRY_AFTER_SECONDS: Final = 24 * 60 * 60
 TITLE_MAX_LENGTH: Final = 120
 EVENT_LOG_MAX_BYTES: Final = 16 * 1024 * 1024
 RUN_ID_STATE_KEY: Final = "cloud_agents_run_id"
+# A list with a status filter covers the newest runs of that status up to this number, because
+# Tasks holds the status and gives this product the tasks to show.
+STATUS_FILTER_MAX_RUNS: Final = 1000
+# Tasks stores a task a short time after this product stores its run, in the same request. A
+# task that belongs to a run from before `created_before` can thus be newer than that time.
+TASK_CREATED_AFTER_RUN_MARGIN: Final = timedelta(minutes=1)
 
 
 class _DuplicateIdempotencyKey(Exception):
@@ -100,7 +107,8 @@ class _ModelSelection:
 class RunList(Sequence[RunDTO]):
     """The runs that match a filter, newest first. It reads only the page that a caller takes a slice of."""
 
-    def __init__(self, rows: QuerySet[CloudAgentRun]) -> None:
+    def __init__(self, team_id: int, rows: QuerySet[CloudAgentRun]) -> None:
+        self._team_id = team_id
         self._rows = rows
 
     def __len__(self) -> int:
@@ -114,8 +122,8 @@ class RunList(Sequence[RunDTO]):
 
     def __getitem__(self, index: int | slice) -> RunDTO | list[RunDTO]:
         if isinstance(index, slice):
-            return [to_run_dto(run) for run in self._rows[index]]
-        return to_run_dto(self._rows[index])
+            return to_run_dtos(self._team_id, list(self._rows[index]))
+        return to_run_dto(self._team_id, self._rows[index])
 
 
 # --- Start ---
@@ -138,7 +146,7 @@ def _find_replay(team_id: int, idempotency_key: str, body_hash: str) -> RunDTO |
         return None
     if run.request_hash != body_hash:
         raise IdempotencyKeyReused()
-    return to_run_dto(run)
+    return to_run_dto(team_id, run)
 
 
 def _resolve_profile(team_id: int, ref: str | None, settings: TeamSettingsDTO) -> ProfileDTO | None:
@@ -204,30 +212,6 @@ def _run_state(run: CloudAgentRun, config: ResolvedRunConfig) -> dict[str, objec
     return {RUN_ID_STATE_KEY: str(run.id), "max_duration_minutes": config.max_duration_minutes}
 
 
-def _attach_session(run: CloudAgentRun, task_run: TaskRunDTO) -> None:
-    """Make `task_run` the current agent session of `run`. The caller saves the row."""
-    session_status = status_logic.run_status_for(task_run.status)
-    sessions = list(run.agent_sessions or [])
-    sessions.append(
-        session_entry(
-            index=len(sessions) + 1,
-            task_run_id=task_run.id,
-            status=session_status,
-            started_at=None,
-            ended_at=None,
-        )
-    )
-    run.agent_sessions = sessions
-    run.task_id = task_run.task_id
-    run.current_task_run_id = task_run.id
-    run.status = CloudAgentRunStatus.QUEUED.value
-    run.stop_reason = None
-    run.error = None
-    run.completed_at = None
-    run.cost_final = False
-    run.last_synced_at = timezone.now()
-
-
 def _create_run(
     team_id: int,
     caller: CallerIdentity,
@@ -268,9 +252,6 @@ def _create_run(
                         "inference": decision.mode,
                         "inference_requested": config.inference.value,
                     },
-                    status=CloudAgentRunStatus.QUEUED.value,
-                    billing_mode=(BillingMode.BILLED if caller.billable else BillingMode.UNBILLED).value,
-                    inference_billing=decision.mode,
                 )
         except IntegrityError:
             if idempotency_key is None:
@@ -299,8 +280,8 @@ def _create_run(
             raise InvalidInput(error.detail, attr=error.attr if error.attr == "model" else None) from error
         if task.run is None:
             raise RuntimeError(f"Tasks returned no run for cloud agent run {run.id}")
-        _attach_session(run, task.run)
-        run.save()
+        run.task_id = task.task_id
+        run.save(update_fields=["task_id", "updated_at"])
     return run
 
 
@@ -356,32 +337,41 @@ def start_run(
             "has_idempotency_key": idempotency_key is not None,
         },
     )
-    return to_run_dto(get_run_row(team_id, run.id)), False
+    return to_run_dto(team_id, get_run_row(team_id, run.id)), False
 
 
 # --- Read ---
 
 
-def _refreshed_row(team_id: int, run_id: UUID) -> CloudAgentRun:
-    run = get_run_row(team_id, run_id)
-    if run.current_task_run_id is not None and sync.needs_read_refresh(run):
-        sync.apply_task_run_update(team_id, run.current_task_run_id)
-        run = get_run_row(team_id, run_id)
-    return run
-
-
 def get_run(team_id: int, run_id: UUID) -> RunDTO:
-    run = _refreshed_row(team_id, run_id)
-    if not run.cost_final and run.task_id is not None:
-        # Shown, not saved: the finalization task stores the cost, so it captures the completion event one time.
-        apply_billing(run, get_task_run_billing(team_id=team_id, task_id=run.task_id))
-    return to_run_dto(run)
+    return to_run_dto(team_id, get_run_row(team_id, run_id))
+
+
+def get_run_usage(team_id: int, run_id: UUID) -> RunUsageDTO:
+    """The cost of a run and its sandbox sessions, as Tasks reports them now."""
+    run = get_run_row(team_id, run_id)
+    billing = read_task_billing(team_id, run)
+    return RunUsageDTO(
+        run_id=run.id,
+        cost=to_cost_dto(billable=run.billable, inference=run.config.get("inference"), billing=billing),
+        sessions=to_session_usage_dtos(billing) if billing is not None else [],
+    )
 
 
 def list_runs(team_id: int, filters: RunListFilters) -> RunList:
     rows = run_rows(team_id)
     if filters.status is not None:
-        rows = rows.filter(status=filters.status.value)
+        task_ids = list_cloud_agent_task_ids(
+            team_id=team_id,
+            statuses=status_logic.task_run_statuses_for(filters.status),
+            limit=STATUS_FILTER_MAX_RUNS,
+            # The time filters go to Tasks too, so the limit counts only the runs of the time range.
+            created_after=filters.created_after,
+            created_before=(
+                filters.created_before + TASK_CREATED_AFTER_RUN_MARGIN if filters.created_before is not None else None
+            ),
+        )
+        rows = rows.filter(task_id__in=task_ids)
     if filters.profile_id is not None:
         rows = rows.filter(profile_id=filters.profile_id)
     if filters.repository:
@@ -393,7 +383,7 @@ def list_runs(team_id: int, filters: RunListFilters) -> RunList:
     if filters.created_before is not None:
         rows = rows.filter(created_at__lt=filters.created_before)
     # The id breaks a tie between two runs of the same instant, so a page boundary never repeats a run.
-    return RunList(rows.order_by("-created_at", "-id"))
+    return RunList(team_id, rows.order_by("-created_at", "-id"))
 
 
 def get_run_events(team_id: int, run_id: UUID) -> RunEventsDTO:
@@ -445,12 +435,14 @@ def _resume(team_id: int, run_id: UUID, user_id: int, previous: TaskRunDTO, cont
     with transaction.atomic():
         limits.concurrency_guard(team_id, lambda: count_active_cloud_agent_runs(team_id=team_id))
         run = CloudAgentRun.objects.for_team(team_id).select_for_update().get(id=run_id)
-        if run.current_task_run_id != previous.id:
+        # Read while the row lock is held, so two messages cannot resume the same session.
+        state = read_task_state(team_id, run)
+        if state is None or state.current_task_run_id != previous.id:
             # Another message resumed the run first. Its session is not ready to take a message yet.
             raise RunNotReady()
         config = ResolvedRunConfig.from_json(run.config)
         try:
-            task_run = resume_cloud_agent_task(
+            resume_cloud_agent_task(
                 team_id=team_id,
                 task_id=previous.task_id,
                 user_id=user_id,
@@ -468,26 +460,26 @@ def _resume(team_id: int, run_id: UUID, user_id: int, previous: TaskRunDTO, cont
             raise RunNotResumable() from None
         except CloudAgentTaskInvalid as error:
             raise InvalidInput(error.detail) from error
-        _attach_session(run, task_run)
-        run.save()
+        run.save(update_fields=["updated_at"])
     return run
 
 
 def send_message(team_id: int, caller: CallerIdentity, run_id: UUID, content: str) -> MessageResult:
     """Send a follow-up message. A live agent gets it. A run that stopped starts a new agent session with it."""
-    run = _refreshed_row(team_id, run_id)
+    run = get_run_row(team_id, run_id)
     _check_quota(team_id, billable=run.billable)
     _check_credential_owner(run, caller)
-    if run.current_task_run_id is None:
+    state = read_task_state(team_id, run)
+    if state is None or state.current_task_run_id is None:
         raise RunNotReady()
-    task_run = get_cloud_agent_task_run(team_id=team_id, run_id=run.current_task_run_id)
+    task_run = get_cloud_agent_task_run(team_id=team_id, run_id=state.current_task_run_id)
     if task_run is None:
         raise RunNotFound()
 
     if not task_run.is_terminal:
         if _send_to_live_session(team_id, run, task_run, content):
             capture_event("cloud_agents_run_followup_sent", caller, team_id, {"run_id": str(run.id), "resumed": False})
-            return MessageResult(resumed=False, run=to_run_dto(run))
+            return MessageResult(resumed=False, run=build_run_dto(run, state, read_task_billing(team_id, run)))
         task_run = get_cloud_agent_task_run(team_id=team_id, run_id=task_run.id)
         if task_run is None or not task_run.is_terminal:
             # The workflow ended and the run is not stored as ended yet, so it cannot be resumed now.
@@ -498,7 +490,7 @@ def send_message(team_id: int, caller: CallerIdentity, run_id: UUID, content: st
         raise InvalidInput("A run needs a user. Use a personal API key or an OAuth token of a user.")
     resumed = _resume(team_id, run.id, user_id, task_run, content)
     capture_event("cloud_agents_run_followup_sent", caller, team_id, {"run_id": str(run.id), "resumed": True})
-    return MessageResult(resumed=True, run=to_run_dto(get_run_row(team_id, resumed.id)))
+    return MessageResult(resumed=True, run=to_run_dto(team_id, get_run_row(team_id, resumed.id)))
 
 
 # --- Cancel ---
@@ -507,10 +499,11 @@ def send_message(team_id: int, caller: CallerIdentity, run_id: UUID, content: st
 def cancel_run(team_id: int, caller: CallerIdentity, run_id: UUID) -> tuple[RunDTO, bool]:
     """Ask the run to stop. The flag is False when the run already ended, so there was nothing to cancel."""
     run = get_run_row(team_id, run_id)
-    if run.current_task_run_id is None or run.task_id is None:
+    state = read_task_state(team_id, run)
+    if state is None or state.current_task_run_id is None:
         raise RunNotReady()
     # The generic cancel has no origin check, so the run is resolved as a Cloud Agents run first.
-    task_run = get_cloud_agent_task_run(team_id=team_id, run_id=run.current_task_run_id)
+    task_run = get_cloud_agent_task_run(team_id=team_id, run_id=state.current_task_run_id)
     if task_run is None:
         raise RunNotFound()
     outcome, _ = cancel_task_run(
@@ -524,8 +517,7 @@ def cancel_run(team_id: int, caller: CallerIdentity, run_id: UUID) -> tuple[RunD
     capture_event("cloud_agents_run_cancelled", caller, team_id, {"run_id": str(run.id), "outcome": outcome})
     match outcome:
         case "accepted" | "already_terminal":
-            sync.apply_task_run_update(team_id, task_run.id)
-            return to_run_dto(get_run_row(team_id, run_id)), outcome == "accepted"
+            return to_run_dto(team_id, run), outcome == "accepted"
         case "not_found":
             raise RunNotFound()
         case _:

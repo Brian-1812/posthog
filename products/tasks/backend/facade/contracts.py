@@ -1119,3 +1119,75 @@ class CloudAgentsRateCardDTO:
     effective_at: datetime
     vcpu_hour_usd: Decimal
     memory_gib_hour_usd: Decimal
+
+
+TaskRunEnd = Literal["done", "cancelled", "error", "timeout", "usage_limit"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudAgentSessionDTO:
+    """One run of a Cloud Agents task. ``index`` starts at 1. ``status`` is the status of the run.
+
+    ``started_at`` is None while the run waits for its sandbox. ``ended_at`` is None while the
+    run is active.
+    """
+
+    index: int
+    task_run_id: UUID
+    status: str
+    started_at: datetime | None
+    ended_at: datetime | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudAgentTaskStateDTO:
+    """Where a Cloud Agents task stands, read from its runs. The latest run decides the status.
+
+    ``run_end`` and ``completed_at`` are None while the latest run is active. ``cancel_source``
+    is the source that a cancel request named, when the latest run has one. ``pr_urls`` and
+    ``summary`` cover all runs of the task. A task with no run reads as ``queued``.
+    """
+
+    task_id: UUID
+    status: str
+    run_end: TaskRunEnd | None
+    cancel_source: str | None
+    current_task_run_id: UUID | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    updated_at: datetime | None
+    pr_url: str | None
+    pr_urls: tuple[str, ...]
+    summary: str | None
+    sessions: tuple[CloudAgentSessionDTO, ...]
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudAgentActiveRunDTO:
+    task_id: UUID
+    task_run_id: UUID
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudAgentTaskUsageDTO:
+    """The charges of one Cloud Agents task, with the same meaning as in ``TaskRunBillingDTO``."""
+
+    task_id: UUID
+    created_at: datetime
+    compute_cost_cents: int | None
+    inference_cost_cents: int | None
+    vcpu_seconds: Decimal
+    gib_seconds: Decimal
+    inference_billing: InferenceBilling
+
+
+@dataclass(frozen=True, kw_only=True)
+class CloudAgentUsageDTO:
+    """Usage of the Cloud Agents tasks that a team created in a period, newest first.
+
+    ``truncated`` is True when the period has more tasks than the limit of the request, so the
+    rows cover only the newest tasks.
+    """
+
+    rows: tuple[CloudAgentTaskUsageDTO, ...]
+    truncated: bool

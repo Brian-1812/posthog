@@ -16,7 +16,6 @@ from uuid import UUID
 from ..logic import (
     catalog as catalog_logic,
     config_resolution,
-    cost as cost_logic,
     limits as limits_logic,
     profiles as profiles_logic,
     runs as runs_logic,
@@ -91,7 +90,7 @@ def cancel_run(team_id: int, caller: CallerIdentity, run_id: UUID) -> tuple[RunD
 
 
 def get_run_usage(team_id: int, run_id: UUID) -> RunUsageDTO:
-    return cost_logic.get_run_usage(team_id, run_id)
+    return runs_logic.get_run_usage(team_id, run_id)
 
 
 def get_run_events(team_id: int, run_id: UUID) -> RunEventsDTO:

@@ -5,13 +5,15 @@ task-shaped happens here, so that product never touches tasks internals. Each fu
 scoped to the reserved ``cloud_agents`` origin: a task of another origin is never found.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet
+from django.db.models import Min, OuterRef, QuerySet, Subquery, Value
+from django.db.models.functions import Coalesce
 
 from posthog.dataclasses import frozen
 from posthog.models import User
@@ -24,6 +26,7 @@ from products.tasks.backend.facade import (
 )
 from products.tasks.backend.feature_flags import get_model_access_error
 from products.tasks.backend.logic.model_access import INFERENCE_STATE_KEYS
+from products.tasks.backend.logic.services.gateway_usage import get_tasks_billing
 from products.tasks.backend.logic.services.inference_resolution import validated_inference_state
 from products.tasks.backend.logic.services.model_catalogue import runtime_adapter_for
 from products.tasks.backend.logic.services.sandbox_config import (
@@ -31,7 +34,8 @@ from products.tasks.backend.logic.services.sandbox_config import (
     SANDBOX_SIZE_STATE_KEY,
     SandboxSize,
 )
-from products.tasks.backend.models import Task, TaskClientProvenance, TaskRun
+from products.tasks.backend.models import SandboxSession, Task, TaskClientProvenance, TaskRun
+from products.tasks.backend.pr_urls import read_pr_urls
 from products.tasks.backend.temporal.process_task.activities.update_task_run_status import (
     TIMED_OUT_INACTIVITY_STATE_KEY,
     TIMED_OUT_WALL_CLOCK_STATE_KEY,
@@ -48,7 +52,9 @@ ACTIVE_RUN_STATUSES = [TaskRun.Status.NOT_STARTED, TaskRun.Status.QUEUED, TaskRu
 # started must not write to the project.
 CLOUD_AGENT_POSTHOG_MCP_SCOPES: Literal["read_only"] = "read_only"
 
-TaskRunEnd = Literal["done", "cancelled", "error", "timeout", "usage_limit"]
+TaskRunEnd = contracts.TaskRunEnd
+
+_WAITING_RUN_STATUSES = (TaskRun.Status.NOT_STARTED, TaskRun.Status.QUEUED)
 
 
 class CloudAgentTaskError(Exception):
@@ -265,13 +271,17 @@ def classify_task_run_end(run: contracts.TaskRunDTO) -> TaskRunEnd:
     """
     if not run.is_terminal:
         raise ValueError(f"Task run {run.id} has not ended (status {run.status})")
-    if run.status == TaskRun.Status.CANCELLED:
+    return _classify_end(run.status, run.error_message, run.state)
+
+
+def _classify_end(status: str, error_message: str | None, state: Mapping[str, Any]) -> TaskRunEnd:
+    if status == TaskRun.Status.CANCELLED:
         return "cancelled"
-    if run.status == TaskRun.Status.COMPLETED:
+    if status == TaskRun.Status.COMPLETED:
         return "done"
-    if (run.error_message or "").startswith(COMPUTE_USAGE_LIMIT_ERROR_MESSAGE):
+    if (error_message or "").startswith(COMPUTE_USAGE_LIMIT_ERROR_MESSAGE):
         return "usage_limit"
-    if run.state.get(TIMED_OUT_INACTIVITY_STATE_KEY) or run.state.get(TIMED_OUT_WALL_CLOCK_STATE_KEY):
+    if state.get(TIMED_OUT_INACTIVITY_STATE_KEY) or state.get(TIMED_OUT_WALL_CLOCK_STATE_KEY):
         return "timeout"
     return "error"
 
@@ -312,6 +322,200 @@ def list_cloud_agent_task_run_ids(*, team_id: int, task_id: UUID) -> list[UUID]:
         )
         .order_by("created_at", "id")
         .values_list("id", flat=True)
+    )
+
+
+def get_cloud_agent_task_states(
+    *, team_id: int, task_ids: Collection[UUID]
+) -> dict[UUID, contracts.CloudAgentTaskStateDTO]:
+    """Where each task in ``task_ids`` stands. Three queries for any number of tasks.
+
+    Every requested id is a key of the result. An id with no run of this origin in this team
+    reads as a queued task with no run, so the caller cannot tell it from a task that waits.
+    """
+    states = {task_id: _state_without_runs(task_id) for task_id in task_ids}
+    if not states:
+        return states
+    runs_by_task: dict[UUID, list[TaskRun]] = {}
+    runs = (
+        _cloud_agent_runs(team_id)
+        .filter(task_id__in=list(states))
+        # The other columns of a run are not read, and some of them are large.
+        .only("id", "task_id", "status", "error_message", "output", "state", "created_at", "updated_at", "completed_at")
+        .order_by("created_at", "id")
+    )
+    for run in runs:
+        runs_by_task.setdefault(run.task_id, []).append(run)
+    if not runs_by_task:
+        return states
+    sandbox_started_at: dict[UUID, datetime] = dict(
+        SandboxSession.objects.for_team(team_id)
+        .filter(task_run_id__in=[run.id for task_runs in runs_by_task.values() for run in task_runs])
+        .values("task_run_id")
+        .annotate(first_created_at=Min("created_at"))
+        .values_list("task_run_id", "first_created_at")
+    )
+    for task_id, task_runs in runs_by_task.items():
+        states[task_id] = _task_state(task_id, task_runs, sandbox_started_at)
+    return states
+
+
+def get_cloud_agent_tasks_billing(
+    *, team_id: int, task_ids: Collection[UUID]
+) -> dict[UUID, contracts.TaskRunBillingDTO]:
+    """The charges of each task in ``task_ids``. Three queries for any number of tasks.
+
+    Every requested id is a key of the result. An id that is not a task of this origin in this
+    team has no charge.
+    """
+    return get_tasks_billing(team_id=team_id, task_ids=task_ids, origin_product=Task.OriginProduct.CLOUD_AGENTS)
+
+
+def list_cloud_agent_task_ids(
+    *,
+    team_id: int,
+    statuses: Collection[str],
+    limit: int,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+) -> list[UUID]:
+    """The newest ``limit`` tasks of this origin whose latest run has one of ``statuses``. One query.
+
+    ``created_after`` and ``created_before`` keep the tasks created from the first up to, and not
+    at, the second. A task with no run counts as queued. Soft-deleted tasks are included, because
+    the caller keeps its own record of them.
+    """
+    tasks = Task.objects.filter(team_id=team_id, origin_product=Task.OriginProduct.CLOUD_AGENTS)
+    if created_after is not None:
+        tasks = tasks.filter(created_at__gte=created_after)
+    if created_before is not None:
+        tasks = tasks.filter(created_at__lt=created_before)
+    latest_status = (
+        TaskRun.objects.filter(task_id=OuterRef("pk"), team_id=team_id)
+        .order_by("-created_at", "-id")
+        .values("status")[:1]
+    )
+    return list(
+        tasks.annotate(latest_status=Coalesce(Subquery(latest_status), Value(TaskRun.Status.QUEUED.value)))
+        .filter(latest_status__in=list(statuses))
+        .order_by("-created_at", "-id")
+        .values_list("id", flat=True)[:limit]
+    )
+
+
+def list_active_billable_cloud_agent_runs(*, team_id: int, limit: int) -> list[contracts.CloudAgentActiveRunDTO]:
+    """The oldest ``limit`` runs of the team that have not ended and that the team pays for. One query."""
+    runs = (
+        _cloud_agent_runs(team_id)
+        .filter(status__in=ACTIVE_RUN_STATUSES, task__client_provenance=TaskClientProvenance.CLOUD_AGENTS)
+        .order_by("created_at", "id")
+        .values_list("task_id", "id")[:limit]
+    )
+    return [contracts.CloudAgentActiveRunDTO(task_id=task_id, task_run_id=run_id) for task_id, run_id in runs]
+
+
+def summarize_cloud_agent_usage(
+    *, team_id: int, date_from: datetime, date_to: datetime, limit: int
+) -> contracts.CloudAgentUsageDTO:
+    """The charges of the tasks created from ``date_from`` up to, and not at, ``date_to``. Four queries.
+
+    One row for each task, so the caller can group the rows by day or by its own record of a task.
+    At most ``limit`` rows, for the newest tasks.
+    """
+    tasks = list(
+        Task.objects.filter(
+            team_id=team_id,
+            origin_product=Task.OriginProduct.CLOUD_AGENTS,
+            created_at__gte=date_from,
+            created_at__lt=date_to,
+        )
+        .order_by("-created_at", "-id")
+        .values_list("id", "created_at")[: limit + 1]
+    )
+    truncated = len(tasks) > limit
+    tasks = tasks[:limit]
+    billing = get_cloud_agent_tasks_billing(team_id=team_id, task_ids=[task_id for task_id, _ in tasks])
+    return contracts.CloudAgentUsageDTO(
+        rows=tuple(
+            contracts.CloudAgentTaskUsageDTO(
+                task_id=task_id,
+                created_at=created_at,
+                compute_cost_cents=billing[task_id].compute_cost_cents,
+                inference_cost_cents=billing[task_id].inference_cost_cents,
+                vcpu_seconds=billing[task_id].vcpu_seconds,
+                gib_seconds=billing[task_id].gib_seconds,
+                inference_billing=billing[task_id].inference_billing,
+            )
+            for task_id, created_at in tasks
+        ),
+        truncated=truncated,
+    )
+
+
+def _cloud_agent_runs(team_id: int) -> QuerySet[TaskRun]:
+    return TaskRun.objects.filter(
+        team_id=team_id, task__team_id=team_id, task__origin_product=Task.OriginProduct.CLOUD_AGENTS
+    )
+
+
+def _state_without_runs(task_id: UUID) -> contracts.CloudAgentTaskStateDTO:
+    return contracts.CloudAgentTaskStateDTO(
+        task_id=task_id,
+        status=TaskRun.Status.QUEUED.value,
+        run_end=None,
+        cancel_source=None,
+        current_task_run_id=None,
+        started_at=None,
+        completed_at=None,
+        updated_at=None,
+        pr_url=None,
+        pr_urls=(),
+        summary=None,
+        sessions=(),
+    )
+
+
+def _task_state(
+    task_id: UUID, runs: list[TaskRun], sandbox_started_at: Mapping[UUID, datetime]
+) -> contracts.CloudAgentTaskStateDTO:
+    """``runs`` are the runs of the task, oldest first."""
+    sessions: list[contracts.CloudAgentSessionDTO] = []
+    for index, run in enumerate(runs, start=1):
+        # A run has no start time of its own. Its sandbox gives the time, and a run that left
+        # the queue with no sandbox on record gives the time it was created.
+        started_at = sandbox_started_at.get(run.id)
+        if started_at is None and run.status not in _WAITING_RUN_STATUSES:
+            started_at = run.created_at
+        sessions.append(
+            contracts.CloudAgentSessionDTO(
+                index=index,
+                task_run_id=run.id,
+                status=run.status,
+                started_at=started_at,
+                ended_at=(run.completed_at or run.updated_at) if run.is_terminal else None,
+            )
+        )
+    latest = runs[-1]
+    latest_state = latest.state or {}
+    cancel_source = latest_state.get("cancel_source")
+    # A later run can open one more pull request, so the list keeps the earlier ones.
+    pr_urls = tuple(dict.fromkeys(url for run in runs for url in read_pr_urls(run.output)))
+    latest_pr_url = next(
+        (url for run in reversed(runs) if isinstance(url := (run.output or {}).get("pr_url"), str) and url), None
+    )
+    return contracts.CloudAgentTaskStateDTO(
+        task_id=task_id,
+        status=latest.status,
+        run_end=_classify_end(latest.status, latest.error_message, latest_state) if latest.is_terminal else None,
+        cancel_source=cancel_source if isinstance(cancel_source, str) else None,
+        current_task_run_id=latest.id,
+        started_at=next((session.started_at for session in sessions if session.started_at is not None), None),
+        completed_at=sessions[-1].ended_at,
+        updated_at=max(run.updated_at for run in runs),
+        pr_url=latest_pr_url or (pr_urls[0] if pr_urls else None),
+        pr_urls=pr_urls,
+        summary=next((summary for run in reversed(runs) if (summary := run.task_summary)), None),
+        sessions=tuple(sessions),
     )
 
 

@@ -12,18 +12,7 @@ from django.db.models.functions import Lower
 from posthog.models.scoping.root_mixin import TeamScopedRootMixin
 from posthog.models.utils import uuid7
 
-from .facade.enums import (
-    BillingMode,
-    CallerKind,
-    CloudAgentRunStatus,
-    InferenceBilling,
-    InferenceMode,
-    PrMode,
-    SizeName,
-    StopReason,
-)
-
-URL_MAX_LENGTH = 2000
+from .facade.enums import CallerKind, InferenceMode, PrMode, SizeName
 
 
 class RunDefaultsMixin(models.Model):
@@ -91,12 +80,10 @@ class CloudAgentRun(TeamScopedRootMixin):
     caller_product = models.CharField(max_length=40, null=True, blank=True)
     billable = models.BooleanField(default=True)
 
-    # The Tasks product owns these rows. They are plain ids, because this product reads Tasks
-    # through its facade and must not join to its tables.
+    # The task of the Tasks product that does the work. A plain id, because this product reads
+    # Tasks through its facade and must not join to its tables. The status, the result, the agent
+    # sessions and the cost of a run are not stored here: each read takes them from Tasks.
     task_id = models.UUIDField(null=True, blank=True, db_index=True)
-    current_task_run_id = models.UUIDField(null=True, blank=True, db_index=True)
-    # Items: {index, task_run_id, status, started_at, ended_at}
-    agent_sessions = models.JSONField(default=list, blank=True)
 
     prompt = models.TextField()
     repository = models.CharField(max_length=255)
@@ -111,28 +98,8 @@ class CloudAgentRun(TeamScopedRootMixin):
     # profile or to the project settings does not change a run that already started.
     config = models.JSONField(default=dict)
 
-    status = models.CharField(
-        max_length=16, choices=CloudAgentRunStatus.choices, default=CloudAgentRunStatus.QUEUED.value
-    )
-    stop_reason = models.CharField(max_length=32, choices=StopReason.choices, null=True, blank=True)
-    error = models.TextField(null=True, blank=True)
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    last_synced_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    pr_url = models.URLField(max_length=URL_MAX_LENGTH, null=True, blank=True)
-    pr_urls = models.JSONField(default=list, blank=True)
-    summary = models.TextField(null=True, blank=True)
-
-    compute_usd = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
-    inference_usd = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
-    vcpu_seconds = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    gib_seconds = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
-    billing_mode = models.CharField(max_length=16, choices=BillingMode.choices, default=BillingMode.BILLED.value)
-    inference_billing = models.CharField(max_length=32, choices=InferenceBilling.choices, null=True, blank=True)
-    cost_final = models.BooleanField(default=False)
 
     class Meta:
         default_manager_name = "all_teams"
@@ -145,21 +112,10 @@ class CloudAgentRun(TeamScopedRootMixin):
         ]
         indexes = [
             models.Index(fields=["team", "-created_at"], name="cloud_agents_run_team_created"),
-            models.Index(fields=["team", "status"], name="cloud_agents_run_team_status"),
-            models.Index(
-                fields=["last_synced_at"],
-                condition=models.Q(status__in=[CloudAgentRunStatus.QUEUED.value, CloudAgentRunStatus.RUNNING.value]),
-                name="cloud_agents_run_active_sync",
-            ),
-            models.Index(
-                fields=["completed_at"],
-                condition=models.Q(cost_final=False),
-                name="cloud_agents_run_cost_pending",
-            ),
         ]
 
     def __str__(self) -> str:
-        return f"CloudAgentRun({self.id}, {self.status})"
+        return f"CloudAgentRun({self.id})"
 
 
 class TeamCloudAgentsConfig(RunDefaultsMixin, TeamScopedRootMixin):

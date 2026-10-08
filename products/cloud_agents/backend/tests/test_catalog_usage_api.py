@@ -13,7 +13,7 @@ from posthog.models import Organization, Team
 from posthog.models.scoping import team_scope
 
 from products.cloud_agents.backend.models import CloudAgentProfile, TeamCloudAgentsConfig
-from products.cloud_agents.backend.tests.base import LOGIC, CloudAgentsFlagMixin, TasksFakeMixin
+from products.cloud_agents.backend.tests.base import LOGIC, CloudAgentsFlagMixin, TasksFakeMixin, billing_dto
 from products.tasks.backend.facade.pricing import get_cloud_agents_rate_card
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -89,17 +89,32 @@ class TestUsageSummary(TasksFakeMixin, CloudAgentsFlagMixin, APIBaseTest):
         with team_scope(self.team.id):
             self.profile = CloudAgentProfile.objects.create(team=self.team, name="Backend")
         other_team = Team.objects.create(organization=Organization.objects.create(name="Other"), name="Other team")
-        costs: list[tuple[datetime, dict[str, Any]]] = [
-            (NOW - timedelta(days=2), {"compute_usd": "1.5000", "inference_usd": "2.0000", "profile": self.profile}),
-            (NOW - timedelta(days=2), {"compute_usd": "0.2500", "inference_usd": None}),
-            (NOW - timedelta(days=1), {"compute_usd": "1.0000", "inference_usd": "0.5000", "profile": self.profile}),
-            (NOW - timedelta(days=1), {}),
-            (NOW - timedelta(days=40), {"compute_usd": "9.0000"}),
-            (NOW - timedelta(days=1), {"compute_usd": "7.0000", "team": other_team}),
+        costs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = [
+            (
+                NOW - timedelta(days=2),
+                {"compute_cost_cents": 150, "inference_cost_cents": 200},
+                {"profile": self.profile},
+            ),
+            # The customer pays the model provider for this run, so its inference cost is not in the totals.
+            (
+                NOW - timedelta(days=2),
+                {"compute_cost_cents": 25, "inference_cost_cents": 900, "inference_billing": "own_subscription"},
+                {},
+            ),
+            (
+                NOW - timedelta(days=1),
+                {"compute_cost_cents": 100, "inference_cost_cents": 50},
+                {"profile": self.profile},
+            ),
+            (NOW - timedelta(days=1), {}, {}),
+            (NOW - timedelta(days=40), {"compute_cost_cents": 900}, {}),
+            (NOW - timedelta(days=1), {"compute_cost_cents": 700}, {"team": other_team}),
         ]
-        for created_at, values in costs:
+        for created_at, billing, values in costs:
             with time_machine.travel(created_at, tick=False):
-                self.make_run(vcpu_seconds=Decimal("100"), gib_seconds=Decimal("400"), **values)
+                self.make_run(
+                    billing=billing_dto(vcpu_seconds=Decimal("100"), gib_seconds=Decimal("400"), **billing), **values
+                )
 
     def usage(self, query: str = "") -> Any:
         with time_machine.travel(NOW, tick=False):

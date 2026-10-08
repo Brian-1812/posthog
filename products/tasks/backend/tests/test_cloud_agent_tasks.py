@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from parameterized import parameterized
 
-from posthog.models import Integration
+from posthog.models import Integration, Team
 from posthog.models.user import User
 
 from products.tasks.backend.exceptions import COMPUTE_USAGE_LIMIT_ERROR_MESSAGE, ComputeBillingLimitError
@@ -19,6 +19,7 @@ from products.tasks.backend.facade import (
     cloud_agents,
     contracts,
 )
+from products.tasks.backend.facade.billing import get_task_run_billing
 from products.tasks.backend.facade.compute import DEFAULT_SANDBOX_SIZE, SandboxSize
 from products.tasks.backend.logic.services.sandbox import SandboxConfig
 from products.tasks.backend.logic.services.sandbox_usage import open_sandbox_session
@@ -495,3 +496,234 @@ class TestCloudAgentTasks(BaseTest):
         assert "end_run_when_done" not in state
         assert _is_burstable_sandbox_resources_enabled(run_id=str(created.latest_run.id), state=state) is True
         assert Task.objects.get(id=created.task_id).client_provenance is None
+
+
+class TestCloudAgentTaskReads(BaseTest):
+    def _task(self, *, team: Any = None, billable: bool = True, origin: str = Task.OriginProduct.CLOUD_AGENTS) -> Task:
+        return Task.objects.create(
+            team=team or self.team,
+            created_by=self.user,
+            title="Fix the flaky test",
+            description="Fix the flaky test",
+            origin_product=origin,
+            internal=True,
+            client_provenance=TaskClientProvenance.CLOUD_AGENTS if billable else None,
+        )
+
+    def _run(self, task: Task, status: str = TaskRun.Status.QUEUED, **fields: Any) -> TaskRun:
+        return TaskRun.objects.create(
+            task=task, team=task.team, status=status, environment=TaskRun.Environment.CLOUD, **fields
+        )
+
+    def _session(self, run: TaskRun, sandbox_id: str, started_at: Any, *, hours: int | None = 1) -> SandboxSession:
+        return SandboxSession.objects.for_team(run.team_id).create(
+            team=run.team,
+            task_run=run,
+            sandbox_id=sandbox_id,
+            origin_product=run.task.origin_product,
+            client_provenance=run.task.client_provenance,
+            cpu_cores=4,
+            memory_gb=16,
+            ttl_seconds=6 * 3600,
+            created_at=started_at,
+            ttl_expires_at=started_at + timedelta(hours=6),
+            user_attributed_at=started_at,
+            ended_at=started_at + timedelta(hours=hours) if hours is not None else None,
+        )
+
+    def _state(self, task: Task) -> contracts.CloudAgentTaskStateDTO:
+        return cloud_agents.get_cloud_agent_task_states(team_id=self.team.id, task_ids=[task.id])[task.id]
+
+    def test_state_follows_the_latest_run_and_keeps_the_results_of_earlier_runs(self) -> None:
+        start = timezone.now() - timedelta(hours=5)
+        task = self._task()
+        first = self._run(task, created_at=start)
+
+        waiting = self._state(task)
+        assert (waiting.status, waiting.run_end, waiting.current_task_run_id) == ("queued", None, first.id)
+        assert (waiting.started_at, waiting.completed_at, waiting.pr_urls, waiting.summary) == (None, None, (), None)
+        assert [(s.index, s.task_run_id, s.status, s.started_at, s.ended_at) for s in waiting.sessions] == [
+            (1, first.id, "queued", None, None)
+        ]
+
+        sandbox_started_at = start + timedelta(minutes=2)
+        self._session(first, "sb-1", sandbox_started_at)
+        ended_at = start + timedelta(hours=1)
+        TaskRun.objects.filter(id=first.id).update(
+            status=TaskRun.Status.FAILED,
+            completed_at=ended_at,
+            state={"timed_out_wall_clock": True, "task_summary": " Fixed half of it. "},
+            output={"pr_url": "https://github.com/acme/app/pull/7"},
+        )
+
+        stopped = self._state(task)
+        assert (stopped.status, stopped.run_end) == ("failed", "timeout")
+        assert (stopped.started_at, stopped.completed_at) == (sandbox_started_at, ended_at)
+        assert (stopped.pr_url, stopped.summary) == ("https://github.com/acme/app/pull/7", "Fixed half of it.")
+
+        second = self._run(task, created_at=start + timedelta(hours=2))
+        resumed = self._state(task)
+        assert (resumed.status, resumed.run_end, resumed.current_task_run_id) == ("queued", None, second.id)
+        # The task is active again, and it keeps the start time and the results of its first run.
+        assert (resumed.started_at, resumed.completed_at) == (sandbox_started_at, None)
+        assert (resumed.pr_urls, resumed.summary) == (("https://github.com/acme/app/pull/7",), "Fixed half of it.")
+        assert [(s.index, s.status, s.ended_at) for s in resumed.sessions] == [
+            (1, "failed", ended_at),
+            (2, "queued", None),
+        ]
+
+        TaskRun.objects.filter(id=second.id).update(
+            status=TaskRun.Status.CANCELLED,
+            completed_at=start + timedelta(hours=3),
+            state={"cancel_source": "cloud_agents_quota_sweep"},
+            output={"pr_url": "https://github.com/acme/app/pull/8"},
+        )
+        cancelled = self._state(task)
+        assert (cancelled.status, cancelled.run_end, cancelled.cancel_source) == (
+            "cancelled",
+            "cancelled",
+            "cloud_agents_quota_sweep",
+        )
+        assert cancelled.pr_url == "https://github.com/acme/app/pull/8"
+        assert cancelled.pr_urls == ("https://github.com/acme/app/pull/7", "https://github.com/acme/app/pull/8")
+        # The second run left the queue with no sandbox on record, so its own creation time is its start.
+        assert cancelled.sessions[1].started_at == second.created_at
+
+    def test_reads_do_not_find_a_task_of_another_origin_or_another_team(self) -> None:
+        other_team = Team.objects.create(organization=self.organization, name="Other team")
+        mine = self._task()
+        other_origin = self._task(origin=Task.OriginProduct.USER_CREATED)
+        other_team_task = self._task(team=other_team)
+        unknown = uuid4()
+        for task in (mine, other_origin, other_team_task):
+            run = self._run(task, TaskRun.Status.COMPLETED, completed_at=timezone.now())
+            self._session(run, f"sb-{task.id}", timezone.now() - timedelta(hours=3))
+        task_ids = [mine.id, other_origin.id, other_team_task.id, unknown]
+
+        states = cloud_agents.get_cloud_agent_task_states(team_id=self.team.id, task_ids=task_ids)
+        billing = cloud_agents.get_cloud_agent_tasks_billing(team_id=self.team.id, task_ids=task_ids)
+
+        assert {task_id: (state.status, len(state.sessions)) for task_id, state in states.items()} == {
+            mine.id: ("completed", 1),
+            other_origin.id: ("queued", 0),
+            other_team_task.id: ("queued", 0),
+            unknown: ("queued", 0),
+        }
+        assert {task_id: charges.compute_cost_cents for task_id, charges in billing.items()} == {
+            mine.id: 37,
+            other_origin.id: None,
+            other_team_task.id: None,
+            unknown: None,
+        }
+        assert billing[mine.id] == get_task_run_billing(team_id=self.team.id, task_id=mine.id)
+        assert cloud_agents.list_cloud_agent_task_ids(team_id=self.team.id, statuses=["completed"], limit=10) == [
+            mine.id
+        ]
+        usage = cloud_agents.summarize_cloud_agent_usage(
+            team_id=self.team.id,
+            date_from=timezone.now() - timedelta(days=1),
+            date_to=timezone.now() + timedelta(days=1),
+            limit=10,
+        )
+        assert [row.task_id for row in usage.rows] == [mine.id]
+
+    def test_status_filter_reads_the_latest_run_of_each_task_newest_first(self) -> None:
+        now = timezone.now()
+        resumed, failed, running, no_run, deleted = (self._task() for _ in range(5))
+        Task.objects.filter(id=deleted.id).update(deleted=True)
+        for age, task in enumerate([deleted, no_run, running, failed, resumed]):
+            Task.objects.filter(id=task.id).update(created_at=now - timedelta(minutes=age))
+        self._run(resumed, TaskRun.Status.FAILED, created_at=now - timedelta(hours=2))
+        self._run(resumed, TaskRun.Status.QUEUED, created_at=now - timedelta(hours=1))
+        self._run(failed, TaskRun.Status.FAILED)
+        self._run(running, TaskRun.Status.IN_PROGRESS)
+        self._run(deleted, TaskRun.Status.FAILED)
+
+        def listed(statuses: list[str], limit: int = 10) -> list[Any]:
+            return cloud_agents.list_cloud_agent_task_ids(team_id=self.team.id, statuses=statuses, limit=limit)
+
+        assert listed(["failed"]) == [deleted.id, failed.id]
+        assert listed(["not_started", "queued"]) == [no_run.id, resumed.id]
+        assert listed(["failed", "in_progress"], limit=2) == [deleted.id, running.id]
+        assert listed(["completed"]) == []
+        # A time range moves the limit to the tasks of that range.
+        assert cloud_agents.list_cloud_agent_task_ids(
+            team_id=self.team.id,
+            statuses=["failed", "in_progress"],
+            limit=1,
+            created_after=now - timedelta(minutes=3),
+            created_before=now - timedelta(seconds=30),
+        ) == [running.id]
+
+    def test_active_billable_runs_are_the_runs_that_a_quota_sweep_stops(self) -> None:
+        other_team = Team.objects.create(organization=self.organization, name="Other team")
+        now = timezone.now()
+        billed = self._task()
+        older = self._run(billed, TaskRun.Status.IN_PROGRESS, created_at=now - timedelta(minutes=5))
+        waiting = self._run(self._task(), TaskRun.Status.NOT_STARTED, created_at=now - timedelta(minutes=1))
+        self._run(self._task(), TaskRun.Status.COMPLETED)
+        self._run(self._task(billable=False), TaskRun.Status.IN_PROGRESS)
+        self._run(self._task(origin=Task.OriginProduct.USER_CREATED), TaskRun.Status.IN_PROGRESS)
+        self._run(self._task(team=other_team), TaskRun.Status.IN_PROGRESS)
+
+        active = cloud_agents.list_active_billable_cloud_agent_runs(team_id=self.team.id, limit=10)
+
+        assert [(run.task_id, run.task_run_id) for run in active] == [
+            (billed.id, older.id),
+            (waiting.task_id, waiting.id),
+        ]
+        assert cloud_agents.list_active_billable_cloud_agent_runs(team_id=self.team.id, limit=1) == active[:1]
+
+    def test_usage_summary_has_one_row_for_each_task_of_the_period_up_to_its_limit(self) -> None:
+        now = timezone.now()
+        tasks = [self._task() for _ in range(3)]
+        for age_days, task in enumerate(tasks):
+            Task.objects.filter(id=task.id).update(created_at=now - timedelta(days=age_days, hours=1))
+            run = self._run(task, TaskRun.Status.COMPLETED, completed_at=now)
+            for index in range(age_days + 1):
+                self._session(run, f"sb-{task.id}-{index}", now - timedelta(hours=5))
+
+        def summarize(days: int, limit: int) -> contracts.CloudAgentUsageDTO:
+            return cloud_agents.summarize_cloud_agent_usage(
+                team_id=self.team.id, date_from=now - timedelta(days=days), date_to=now, limit=limit
+            )
+
+        everything = summarize(days=3, limit=10)
+        assert [(row.task_id, row.compute_cost_cents, row.vcpu_seconds) for row in everything.rows] == [
+            (tasks[0].id, 37, 14_400),
+            (tasks[1].id, 74, 28_800),
+            (tasks[2].id, 110, 43_200),
+        ]
+        assert everything.truncated is False
+        assert [row.task_id for row in summarize(days=2, limit=10).rows] == [tasks[0].id, tasks[1].id]
+        newest = summarize(days=3, limit=2)
+        assert ([row.task_id for row in newest.rows], newest.truncated) == ([tasks[0].id, tasks[1].id], True)
+
+    @parameterized.expand([("few_tasks", 3), ("a_page_of_tasks", 50)])
+    def test_each_read_makes_the_same_number_of_queries_for_any_number_of_tasks(self, _name: str, count: int) -> None:
+        now = timezone.now()
+        tasks = [self._task() for _ in range(count)]
+        for index, task in enumerate(tasks):
+            first = self._run(task, TaskRun.Status.FAILED, completed_at=now, created_at=now - timedelta(hours=2))
+            self._run(task, TaskRun.Status.IN_PROGRESS)
+            self._session(first, f"sb-{index}", now - timedelta(hours=5))
+        task_ids = [task.id for task in tasks]
+
+        # The runs, the team that scopes the sandbox sessions, and the sandbox sessions.
+        with self.assertNumQueries(3):
+            states = cloud_agents.get_cloud_agent_task_states(team_id=self.team.id, task_ids=task_ids)
+        with self.assertNumQueries(3):
+            billing = cloud_agents.get_cloud_agent_tasks_billing(team_id=self.team.id, task_ids=task_ids)
+        with self.assertNumQueries(1):
+            listed = cloud_agents.list_cloud_agent_task_ids(team_id=self.team.id, statuses=["in_progress"], limit=count)
+        with self.assertNumQueries(1):
+            active = cloud_agents.list_active_billable_cloud_agent_runs(team_id=self.team.id, limit=count)
+        # The tasks of the period, then the same three queries as the charges.
+        with self.assertNumQueries(4):
+            usage = cloud_agents.summarize_cloud_agent_usage(
+                team_id=self.team.id, date_from=now - timedelta(days=1), date_to=now + timedelta(days=1), limit=count
+            )
+
+        assert {len(state.sessions) for state in states.values()} == {2}
+        assert {charges.compute_cost_cents for charges in billing.values()} == {37}
+        assert len(states) == len(billing) == len(listed) == len(active) == len(usage.rows) == count

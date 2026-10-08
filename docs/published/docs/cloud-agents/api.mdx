@@ -220,6 +220,8 @@ GET /api/projects/:project_id/cloud_agents/runs/
 Runs come newest first, in a page with `count`, `next`, `previous` and `results`.
 Use `limit` and `offset` to page.
 Filter with `status`, `profile_id`, `repository`, `tag`, `created_after` and `created_before`.
+A list with a `status` filter covers the newest 1,000 runs that have that status.
+To read older runs, add `created_before`.
 
 ## Follow a run
 
@@ -467,6 +469,7 @@ curl --get "https://us.posthog.com/api/projects/$PROJECT_ID/cloud_agents/usage/"
 
 `group_by` is `day` or `profile`, and the default is `day`.
 The default range is the 30 days before `date_to`, and the longest range is 366 days.
+A summary covers the newest 2,000 runs of the range. Use a shorter range for a project with more runs.
 The response has `totals` and `buckets`, each with `runs`, `compute_usd`, `inference_usd`, `total_usd`, `vcpu_seconds` and `gib_seconds`.
 
 ## Inference

@@ -1,8 +1,4 @@
-"""Product analytics for cloud_agents, for code that runs in a web request.
-
-A Celery task must not call `capture_event`: use `ph_scoped_capture` from `posthog.ph_client`
-there, because the global client can lose events when the worker exits.
-"""
+"""Product analytics for cloud_agents, for code that runs in a web request."""
 
 from __future__ import annotations
 
@@ -13,7 +9,6 @@ import posthoganalytics
 
 from posthog.event_usage import groups, report_user_action
 from posthog.models import Team, User
-from posthog.ph_client import ph_scoped_capture
 
 from ..facade.contracts import CallerIdentity
 
@@ -42,23 +37,5 @@ def capture_event(event: str, caller: CallerIdentity, team_id: int, properties: 
             properties=event_properties,
             groups=groups(team.organization, team),
         )
-    except Exception:
-        logger.exception("cloud_agents_analytics_capture_failed", event=event, team_id=team_id)
-
-
-def capture_event_in_task(event: str, team_id: int, user_id: int | None, properties: dict[str, Any]) -> None:
-    """Capture one event from a Celery task. An analytics failure never fails the task."""
-    try:
-        team = Team.objects.select_related("organization").filter(id=team_id).first()
-        if team is None:
-            return
-        distinct_id = User.objects.filter(id=user_id).values_list("distinct_id", flat=True).first() if user_id else None
-        with ph_scoped_capture() as capture:
-            capture(
-                distinct_id=distinct_id or str(team.uuid),
-                event=event,
-                properties=properties,
-                groups=groups(team.organization, team),
-            )
     except Exception:
         logger.exception("cloud_agents_analytics_capture_failed", event=event, team_id=team_id)

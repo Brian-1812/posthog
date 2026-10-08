@@ -11,7 +11,14 @@ run id, task id and team id and do no visibility check, so an internal task is n
 them. They also do no origin check: resolve the run with ``get_cloud_agent_task_run`` first.
 """
 
-from products.tasks.backend.facade.contracts import CloudAgentTaskDTO
+from products.tasks.backend.facade.contracts import (
+    CloudAgentActiveRunDTO,
+    CloudAgentSessionDTO,
+    CloudAgentTaskDTO,
+    CloudAgentTaskStateDTO,
+    CloudAgentTaskUsageDTO,
+    CloudAgentUsageDTO,
+)
 from products.tasks.backend.logic.services.cloud_agent_tasks import (
     CloudAgentRunNotResumable,
     CloudAgentTaskError,
@@ -23,22 +30,37 @@ from products.tasks.backend.logic.services.cloud_agent_tasks import (
     count_active_cloud_agent_runs,
     create_cloud_agent_task,
     get_cloud_agent_task_run,
+    get_cloud_agent_task_states,
+    get_cloud_agent_tasks_billing,
+    list_active_billable_cloud_agent_runs,
+    list_cloud_agent_task_ids,
     list_cloud_agent_task_run_ids,
     resume_cloud_agent_task,
+    summarize_cloud_agent_usage,
 )
 
 __all__ = [
+    "CloudAgentActiveRunDTO",
     "CloudAgentRunNotResumable",
+    "CloudAgentSessionDTO",
     "CloudAgentTaskDTO",
     "CloudAgentTaskError",
     "CloudAgentTaskInvalid",
     "CloudAgentTaskNotFound",
     "CloudAgentTaskOriginKeyConflict",
+    "CloudAgentTaskStateDTO",
+    "CloudAgentTaskUsageDTO",
+    "CloudAgentUsageDTO",
     "TaskRunEnd",
     "classify_task_run_end",
     "count_active_cloud_agent_runs",
     "create_cloud_agent_task",
     "get_cloud_agent_task_run",
+    "get_cloud_agent_task_states",
+    "get_cloud_agent_tasks_billing",
+    "list_active_billable_cloud_agent_runs",
+    "list_cloud_agent_task_ids",
     "list_cloud_agent_task_run_ids",
     "resume_cloud_agent_task",
+    "summarize_cloud_agent_usage",
 ]

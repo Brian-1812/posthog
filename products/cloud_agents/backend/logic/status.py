@@ -10,6 +10,10 @@ TERMINAL_STATUSES: Final = frozenset(
     {CloudAgentRunStatus.COMPLETED, CloudAgentRunStatus.FAILED, CloudAgentRunStatus.CANCELLED}
 )
 
+# The `source` that the quota sweep gives to Tasks when it cancels a run. Tasks stores it on the
+# run, and it is the only record that the usage limit, and not a person, stopped the run.
+QUOTA_SWEEP_CANCEL_SOURCE: Final = "cloud_agents_quota_sweep"
+
 _STATUS_BY_TASK_RUN_STATUS: Final[dict[str, CloudAgentRunStatus]] = {
     "not_started": CloudAgentRunStatus.QUEUED,
     "queued": CloudAgentRunStatus.QUEUED,
@@ -17,6 +21,11 @@ _STATUS_BY_TASK_RUN_STATUS: Final[dict[str, CloudAgentRunStatus]] = {
     "completed": CloudAgentRunStatus.COMPLETED,
     "failed": CloudAgentRunStatus.FAILED,
     "cancelled": CloudAgentRunStatus.CANCELLED,
+}
+
+_TASK_RUN_STATUSES_BY_STATUS: Final[dict[CloudAgentRunStatus, tuple[str, ...]]] = {
+    status: tuple(task_run_status for task_run_status, mapped in _STATUS_BY_TASK_RUN_STATUS.items() if mapped == status)
+    for status in CloudAgentRunStatus
 }
 
 _STOP_REASON_BY_RUN_END: Final[dict[str, StopReason]] = {
@@ -40,14 +49,6 @@ _ERROR_BY_STOP_REASON: Final[dict[StopReason, str]] = {
     StopReason.BUDGET_EXCEEDED: "The run stopped because it reached its cost limit.",
 }
 
-_STATUS_ORDER: Final[dict[CloudAgentRunStatus, int]] = {
-    CloudAgentRunStatus.QUEUED: 0,
-    CloudAgentRunStatus.RUNNING: 1,
-    CloudAgentRunStatus.COMPLETED: 2,
-    CloudAgentRunStatus.FAILED: 2,
-    CloudAgentRunStatus.CANCELLED: 2,
-}
-
 
 def run_status_for(task_run_status: str) -> CloudAgentRunStatus:
     """The public status of a Tasks run status. Raises `ValueError` for a status that Tasks does not have."""
@@ -57,27 +58,32 @@ def run_status_for(task_run_status: str) -> CloudAgentRunStatus:
         raise ValueError(f"Unknown task run status {task_run_status!r}") from None
 
 
-def stop_reason_for(status: CloudAgentRunStatus, run_end: str | None) -> StopReason | None:
-    """Why the run stopped. None while the run is active. `run_end` is the Tasks class of the end."""
+def task_run_statuses_for(status: CloudAgentRunStatus) -> tuple[str, ...]:
+    """The Tasks run statuses that the API shows as `status`."""
+    return _TASK_RUN_STATUSES_BY_STATUS[status]
+
+
+def stop_reason_for(
+    status: CloudAgentRunStatus, run_end: str | None, cancel_source: str | None = None
+) -> StopReason | None:
+    """Why the run stopped. None while the run is active.
+
+    `run_end` is the Tasks class of the end. `cancel_source` is the source of the cancel request
+    that Tasks recorded on the run, if there was one.
+    """
     if status not in TERMINAL_STATUSES:
         return None
     if run_end is None:
         raise ValueError("A run that ended needs its end class")
     try:
-        return _STOP_REASON_BY_RUN_END[run_end]
+        stop_reason = _STOP_REASON_BY_RUN_END[run_end]
     except KeyError:
         raise ValueError(f"Unknown run end {run_end!r}") from None
+    if stop_reason == StopReason.CANCELLED and cancel_source == QUOTA_SWEEP_CANCEL_SOURCE:
+        return StopReason.USAGE_LIMIT
+    return stop_reason
 
 
 def error_message_for(stop_reason: StopReason | None) -> str | None:
     """The message the API shows for a stop reason. None for a run that is active, done or cancelled."""
     return _ERROR_BY_STOP_REASON.get(stop_reason) if stop_reason is not None else None
-
-
-def is_terminal(status: CloudAgentRunStatus | str) -> bool:
-    return CloudAgentRunStatus(status) in TERMINAL_STATUSES
-
-
-def moves_forward(current: CloudAgentRunStatus | str, new: CloudAgentRunStatus | str) -> bool:
-    """False when `new` is an earlier stage than `current`, which is what a late read gives."""
-    return _STATUS_ORDER[CloudAgentRunStatus(new)] >= _STATUS_ORDER[CloudAgentRunStatus(current)]

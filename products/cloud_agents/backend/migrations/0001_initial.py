@@ -120,8 +120,6 @@ class Migration(migrations.Migration):
                 ("caller_product", models.CharField(blank=True, max_length=40, null=True)),
                 ("billable", models.BooleanField(default=True)),
                 ("task_id", models.UUIDField(blank=True, db_index=True, null=True)),
-                ("current_task_run_id", models.UUIDField(blank=True, db_index=True, null=True)),
-                ("agent_sessions", models.JSONField(blank=True, default=list)),
                 ("prompt", models.TextField()),
                 ("repository", models.CharField(max_length=255)),
                 ("branch", models.CharField(blank=True, max_length=255, null=True)),
@@ -130,68 +128,8 @@ class Migration(migrations.Migration):
                 ("idempotency_key", models.CharField(blank=True, max_length=100, null=True)),
                 ("request_hash", models.CharField(blank=True, max_length=64, null=True)),
                 ("config", models.JSONField(default=dict)),
-                (
-                    "status",
-                    models.CharField(
-                        choices=[
-                            ("queued", "Queued"),
-                            ("running", "Running"),
-                            ("completed", "Completed"),
-                            ("failed", "Failed"),
-                            ("cancelled", "Cancelled"),
-                        ],
-                        default="queued",
-                        max_length=16,
-                    ),
-                ),
-                (
-                    "stop_reason",
-                    models.CharField(
-                        blank=True,
-                        choices=[
-                            ("done", "Done"),
-                            ("cancelled", "Cancelled"),
-                            ("error", "Error"),
-                            ("timeout", "Timeout"),
-                            ("budget_exceeded", "Budget Exceeded"),
-                            ("usage_limit", "Usage Limit"),
-                        ],
-                        max_length=32,
-                        null=True,
-                    ),
-                ),
-                ("error", models.TextField(blank=True, null=True)),
-                ("started_at", models.DateTimeField(blank=True, null=True)),
-                ("completed_at", models.DateTimeField(blank=True, null=True)),
-                ("last_synced_at", models.DateTimeField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
-                ("pr_url", models.URLField(blank=True, max_length=2000, null=True)),
-                ("pr_urls", models.JSONField(blank=True, default=list)),
-                ("summary", models.TextField(blank=True, null=True)),
-                ("compute_usd", models.DecimalField(blank=True, decimal_places=4, max_digits=12, null=True)),
-                ("inference_usd", models.DecimalField(blank=True, decimal_places=4, max_digits=12, null=True)),
-                ("vcpu_seconds", models.DecimalField(blank=True, decimal_places=3, max_digits=14, null=True)),
-                ("gib_seconds", models.DecimalField(blank=True, decimal_places=3, max_digits=14, null=True)),
-                (
-                    "billing_mode",
-                    models.CharField(
-                        choices=[("billed", "Billed"), ("unbilled", "Unbilled")], default="billed", max_length=16
-                    ),
-                ),
-                (
-                    "inference_billing",
-                    models.CharField(
-                        blank=True,
-                        choices=[
-                            ("posthog", "PostHog"),
-                            ("own_subscription", "Own Subscription"),
-                        ],
-                        max_length=32,
-                        null=True,
-                    ),
-                ),
-                ("cost_final", models.BooleanField(default=False)),
                 (
                     "created_by",
                     models.ForeignKey(
@@ -322,26 +260,6 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="cloudagentrun",
             index=models.Index(fields=["team", "-created_at"], name="cloud_agents_run_team_created"),
-        ),
-        migrations.AddIndex(
-            model_name="cloudagentrun",
-            index=models.Index(fields=["team", "status"], name="cloud_agents_run_team_status"),
-        ),
-        migrations.AddIndex(
-            model_name="cloudagentrun",
-            index=models.Index(
-                condition=models.Q(("status__in", ["queued", "running"])),
-                fields=["last_synced_at"],
-                name="cloud_agents_run_active_sync",
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="cloudagentrun",
-            index=models.Index(
-                condition=models.Q(("cost_final", False)),
-                fields=["completed_at"],
-                name="cloud_agents_run_cost_pending",
-            ),
         ),
         migrations.AddConstraint(
             model_name="cloudagentrun",

@@ -15,7 +15,7 @@ from products.tasks.backend.facade.streams import (
 )
 
 from ..facade.contracts import RunEventStream, RunNotFound, RunNotReady
-from .run_rows import get_run_row, to_run_dto
+from .run_rows import build_run_dto, get_run_row, read_task_billing, read_task_state
 
 RUN_EVENT_NAME = "run"
 
@@ -25,17 +25,18 @@ def prepare_run_event_stream(
 ) -> RunEventStream:
     """Resolve the run for streaming. It does the database reads, so call it on the request thread."""
     run = get_run_row(team_id, run_id)
-    if run.current_task_run_id is None or run.task_id is None:
+    state = read_task_state(team_id, run)
+    if run.task_id is None or state is None or state.current_task_run_id is None:
         raise RunNotReady()
     # The stream helper has no origin check, so the run is resolved as a Cloud Agents run first.
-    if get_cloud_agent_task_run(team_id=team_id, run_id=run.current_task_run_id) is None:
+    if get_cloud_agent_task_run(team_id=team_id, run_id=state.current_task_run_id) is None:
         raise RunNotFound()
     source = prepare_task_run_sse_stream(
-        run.current_task_run_id, run.task_id, team_id, last_event_id=last_event_id, start_latest=start_latest
+        state.current_task_run_id, run.task_id, team_id, last_event_id=last_event_id, start_latest=start_latest
     )
     if source is None:
         raise RunNotFound()
-    return RunEventStream(run=to_run_dto(run), source=source)
+    return RunEventStream(run=build_run_dto(run, state, read_task_billing(team_id, run)), source=source)
 
 
 async def run_event_stream(stream: RunEventStream) -> AsyncGenerator[bytes]:
