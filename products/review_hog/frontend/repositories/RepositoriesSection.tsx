@@ -55,7 +55,12 @@ export function RepositoriesSection(): JSX.Element {
                     <LemonSkeleton className="h-40 w-full" />
                 )
             ) : (
-                <div className="@container">
+                <div className="@container flex flex-col gap-2">
+                    {repositoriesLoadFailed && (
+                        <LemonBanner type="error" action={{ children: 'Retry', onClick: () => loadRepositories() }}>
+                            Could not refresh the repositories. The results below may be out of date.
+                        </LemonBanner>
+                    )}
                     <div
                         className="grid grid-cols-1 overflow-hidden rounded border border-primary @min-[40rem]:grid-flow-col @min-[40rem]:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] @min-[40rem]:[grid-template-rows:repeat(var(--repository-rows),auto)]"
                         style={{ '--repository-rows': repositories.length + 1 } as React.CSSProperties}

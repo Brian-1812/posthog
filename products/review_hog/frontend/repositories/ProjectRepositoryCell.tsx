@@ -79,7 +79,7 @@ export function ProjectRepositoryCell({
                     <LemonSnack
                         key={person.id}
                         title={person.user.email}
-                        onClose={() => removePerson(repository, person)}
+                        onClose={savingReason ? undefined : () => removePerson(repository, person)}
                         data-attr="review-hog-repository-person"
                     >
                         {fullName(person.user)}

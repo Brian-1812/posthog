@@ -1,9 +1,10 @@
 import { useActions, useValues } from 'kea'
 
 import { IconGithub, IconPlus } from '@posthog/icons'
-import { LemonButton, LemonInputSelect, LemonSelect, LemonSkeleton } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, LemonInputSelect, LemonSelect, LemonSkeleton } from '@posthog/lemon-ui'
 
 import { githubRepositorySearchLogic } from 'lib/integrations/githubRepositorySearchLogic'
+import { integrationsLogic } from 'lib/integrations/integrationsLogic'
 
 import { addableRepositoryNames } from './repositoryChoices'
 import { reviewHogRepositoriesLogic } from './reviewHogRepositoriesLogic'
@@ -67,9 +68,19 @@ function RepositoryPicker({ integrationId }: { integrationId: number }): JSX.Ele
 }
 
 export function AddReviewRepositoryBar(): JSX.Element {
-    const { integrations, githubIntegration, connectGitHubUrl } = useValues(reviewHogRepositoriesLogic)
+    const { integrations, githubIntegration, connectGitHubUrl, repositories } = useValues(reviewHogRepositoriesLogic)
+    const { integrationsLoading } = useValues(integrationsLogic)
+    const { loadIntegrations } = useActions(integrationsLogic)
 
-    if (integrations === null) {
+    if (integrations === null && !integrationsLoading) {
+        return (
+            <LemonBanner type="error" action={{ children: 'Retry', onClick: () => loadIntegrations() }}>
+                Could not load your GitHub connection.
+            </LemonBanner>
+        )
+    }
+    // Wait for the added list too: a list that lands after an add would drop the new row.
+    if (integrations === null || repositories === null) {
         return <LemonSkeleton className="h-10 w-full" />
     }
     if (!githubIntegration) {

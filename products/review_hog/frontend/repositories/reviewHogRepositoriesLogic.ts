@@ -237,7 +237,9 @@ export const reviewHogRepositoriesLogic = kea<reviewHogRepositoriesLogicType>([
 
     reducers({
         repositories: {
-            addRepositorySuccess: (state, { repository }) => [...(state ?? []), repository],
+            // Adding is only possible once the list loaded, so a null list stays null rather than turning
+            // into a one-row list that hides the others.
+            addRepositorySuccess: (state, { repository }) => (state ? [...state, repository] : state),
             removeRepositorySuccess: (state, { repositoryId }) =>
                 state?.filter((repository) => repository.id !== repositoryId) ?? state,
             repositorySaved: (state, { repository }) =>
@@ -413,11 +415,11 @@ export const reviewHogRepositoriesLogic = kea<reviewHogRepositoriesLogicType>([
             },
             setDefaultReviewMode: ({ mode }) => {
                 actions.updateSettings({ default_review_mode: mode })
-                posthog.capture('review hog default review mode changed', { mode })
             },
             updateSettingsSuccess: ({ payload }) => {
                 // The default decides `my_result` in every repository without an own choice.
                 if (payload && 'default_review_mode' in payload) {
+                    posthog.capture('review hog default review mode changed', { mode: payload.default_review_mode })
                     actions.loadRepositories()
                 }
             },
